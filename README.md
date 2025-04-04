@@ -1,26 +1,120 @@
-# Wheel Theft
-## DESCRIPTION
+# Task 1: Despawning Work Vehicle on Mission Cancel
 
+Added a WORK_VEHICLE variable in client/truckSpawn.lua to track the vehicle.
 
-This script lets your players earn some hard cash by stealing wheels using integrated [ls_bolt_minigame](https://lith.store/package/6174416) export. 
-Players will receive a mission from NPC ped containing a number plate of the target vehicle and a general area where the vehicle is located. 
-After going to the general area and finding the target vehicle, players will have to jack the car up using a car jack. 
-Using [ls_bolt_minigame](https://lith.store/package/6174416) export, players will unscrew the bolts of each wheel and store the wheel in the trunk of a truck.
-After all wheels are taken off the car, the player can retrieve his jackstand and place the car on bricks. Player will be given a location of the buyer to sell off the stolen wheels.
+Modified SpawnTruck to store the vehicle reference.
 
-## SCRIPT PREVIEW
-https://www.youtube.com/watch?v=xyJZGVEFAmo
+Created DespawnWorkVehicle to remove the vehicle properly.
 
-## IMPORTANT INFORMATION
-1. The jack stand item (default `ls_jackstand`) is provided in the resource files **BUT YOU HAVE TO FIND A WAY HOW TO GIVE THE PLAYER THE JACK STAND ITEM**
-2. The Player **MUST** have a pick-up truck near the target vehicle to store the stolen wheels. Added config option to spawn a truck after starting a mission.
+Called this function from CancelMission in client/mission.lua.
 
+Added cleanup when the resource stops.
 
-## Main Features:
-* Obfuscated area of the target vehicle
-* Search minigame of the target vehicle using a license plate number
-* Integrated bolt minigame
-* ESX and QBCORE ready
-* Low Resmon (usually 0.00, max 0.02 if not using 3dtext, max 0.14 if using 3DText)
-* Integrated ps-dispatch, cd-dispatch and custom 'in-built' dispatch systems
-* Compatible for standalone
+Ensured it only despawns when the player cancels via the NPC.
+
+# Task 2: Implementing ox_target for Interactions
+
+## Replaced key presses (E/H) with ox_target:
+
+**Mission NPCs (Start/Cancel):**
+
+Added network ID tracking.
+
+Created dynamic options based on mission state.
+
+Cleaned up properly when missions end.
+
+**Seller Ped & Crate (Sale/Drop Wheels):**
+
+Added target options with state-based availability.
+
+Ensured proper cleanup.
+
+**Vehicle Wheel Theft:**
+
+Implemented bone-targeting for precise interactions.
+
+Added different options for target vs. non-target vehicles.
+
+Included options for lowering vehicles and finishing theft.
+
+**Truck Interactions (Store/Take Wheels):**
+
+Added target options for storing and retrieving wheels.
+
+Ensured proper cleanup.
+
+# Code Changes Summary
+
+## Files Affected
+- `client/client.lua`
+
+## New Functions Added
+1. `RegisterTargetVehicleWithOxTarget(vehicle, isTargetVehicle)`
+   - Handles vehicle registration with ox_target
+   - Adds wheel theft options
+   - Manages vehicle cleanup
+   - Parameters:
+     - vehicle: The target vehicle entity
+     - isTargetVehicle: Boolean indicating if it's a mission vehicle
+
+2. `RegisterTruckWithOxTarget(vehicle)`
+   - Manages truck registration for wheel storage
+   - Handles wheel storage options
+   - Parameters:
+     - vehicle: The truck entity
+
+## Modified Functions
+1. `StartWheelTheft(vehicle)`
+   - Added ox_target integration
+   - Improved vehicle tracking
+   - Enhanced wheel theft process
+
+2. `StopWheelTheft(vehicle)`
+   - Added ox_target cleanup
+   - Improved vehicle state management
+   - Enhanced mission completion handling
+
+3. `BeginWheelLoadingIntoTruck(wheelProp)`
+   - Added ox_target integration
+   - Improved wheel storage process
+   - Enhanced truck interaction
+
+4. `EnableWheelTakeOut()`
+   - Added ox_target integration
+   - Improved wheel retrieval process
+   - Enhanced truck interaction
+
+## New Variables Added
+1. `targetVehicleNetIds`
+   - Array to track registered target vehicles
+   - Used for cleanup and management
+
+2. `truckNetId`
+   - Stores the network ID of the current truck
+   - Used for truck-specific operations
+
+## Resource Management
+- Added comprehensive cleanup in `onResourceStop` handler
+- Improved vehicle tracking and deletion
+- Enhanced ox_target entity management
+
+## Integration Points
+1. ox_target Integration
+   - Vehicle registration
+   - Wheel theft options
+   - Truck storage options
+   - Entity cleanup
+
+2. Vehicle Management
+   - Improved vehicle state tracking
+   - Enhanced cleanup procedures
+   - Better mission vehicle handling
+
+## Total Changes
+- 4 new functions
+- 4 modified functions
+- 2 new variables
+- 1 new event handler
+- Improved resource management
+- Enhanced integration with ox_target

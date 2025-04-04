@@ -18,6 +18,10 @@ STORED_WHEELS = {}
 WHEEL_PROP = nil
 TARGET_VEHICLE = nil
 
+-- Variables for ox_target integration
+local targetVehicleNetIds = {}
+local truckNetId = nil
+
 function StartMission()
     MISSION_ACTIVATED = true
 
@@ -89,6 +93,11 @@ function StartWheelTheft(vehicle)
     Citizen.Wait(4000)
     local notified = 'waiting'
 
+    -- Register the target vehicle with ox_target if it's enabled
+    if Config.target.enabled then
+        RegisterTargetVehicleWithOxTarget(vehicle, true)
+    end
+
     while true do
         local sleep = 1000
         local playerId = PlayerPedId()
@@ -119,9 +128,8 @@ function StartWheelTheft(vehicle)
 
                         StartWheelDismount(vehicle, wheelIndex, false, true, false)
                     end
-                else
-                    -- Target
                 end
+                -- Target implementation is handled by RegisterTargetVehicleWithOxTarget
             end
 
             if #STORED_WHEELS == 4 then
@@ -159,28 +167,34 @@ Citizen.CreateThread(function()
             local vehicle, isRaised = NearestVehicleCached(coords, 3.0)
 
             if vehicle and vehicle ~= TARGET_VEHICLE and isRaised then
-                sleep = 1
-                local wheelCoords, wheelToPlayerDistance, wheelIndex, isWheelMounted = FindNearestWheel(vehicle)
-                local vehicleCoords = GetEntityCoords(vehicle)
-
-                if isWheelMounted then
-                    Draw3DText(wheelCoords.x, wheelCoords.y, wheelCoords.z + 0.5, L('Press ~g~[~w~E~g~]~w~ to steal this wheel'), 4, 0.065, 0.065)
-
-                    if IsControlJustReleased(0, Keys['E']) then
-                        StartWheelDismount(vehicle, wheelIndex, false, true, false, true)
-                    end
+                -- Register the vehicle with ox_target if it's enabled
+                if Config.target.enabled then
+                    RegisterTargetVehicleWithOxTarget(vehicle, false)
                 else
-                    Draw3DText(vehicleCoords.x, vehicleCoords.y, vehicleCoords.z + 0.5, L('Press ~g~[~w~E~g~]~w~ to lower this vehicle'), 4, 0.065, 0.065)
+                    -- Legacy E key approach
+                    sleep = 1
+                    local wheelCoords, wheelToPlayerDistance, wheelIndex, isWheelMounted = FindNearestWheel(vehicle)
+                    local vehicleCoords = GetEntityCoords(vehicle)
 
-                    if IsControlJustReleased(0, Keys['E']) then
-                        local lowered = LowerVehicle(false, true)
+                    if isWheelMounted then
+                        Draw3DText(wheelCoords.x, wheelCoords.y, wheelCoords.z + 0.5, L('Press ~g~[~w~E~g~]~w~ to steal this wheel'), 4, 0.065, 0.065)
 
-                        while not lowered do
-                            Citizen.Wait(100)
+                        if IsControlJustReleased(0, Keys['E']) then
+                            StartWheelDismount(vehicle, wheelIndex, false, true, false, true)
                         end
+                    else
+                        Draw3DText(vehicleCoords.x, vehicleCoords.y, vehicleCoords.z + 0.5, L('Press ~g~[~w~E~g~]~w~ to lower this vehicle'), 4, 0.065, 0.065)
 
-                        SpawnBricksUnderVehicle(vehicle)
-                        break
+                        if IsControlJustReleased(0, Keys['E']) then
+                            local lowered = LowerVehicle(false, true)
+
+                            while not lowered do
+                                Citizen.Wait(100)
+                            end
+
+                            SpawnBricksUnderVehicle(vehicle)
+                            break
+                        end
                     end
                 end
             end
@@ -188,7 +202,7 @@ Citizen.CreateThread(function()
 
         Citizen.Wait(sleep)
     end
-end)
+end
 
 function NearestVehicleCached(coords, radius)
     return UseCache('nearestCacheVehicle', function()
@@ -204,8 +218,19 @@ function NearestVehicleCached(coords, radius)
 end
 
 function StopWheelTheft(vehicle)
+    -- With ox_target, we don't need a separate thread as finishing is handled by the target options
+    if Config.target.enabled then
+        -- The ox_target is already set up in RegisterTargetVehicleWithOxTarget
+        -- We just need to make sure the vehicle network ID is tracked for cleanup
+        local netId = NetworkGetNetworkIdFromEntity(vehicle)
+        if not Contains(targetVehicleNetIds, netId) then
+            table.insert(targetVehicleNetIds, netId)
+        end
+        return
+    end
+    
+    -- Legacy E key approach
     Citizen.CreateThread(function()
-
         while true do
             local sleep = 1000
             local player = PlayerPedId()
@@ -230,7 +255,6 @@ function StopWheelTheft(vehicle)
                 end
             end
 
-
             Citizen.Wait(sleep)
         end
 
@@ -251,6 +275,177 @@ function IsPoliceNotified()
     else
         return false
     end
+end
+
+-- Function to register a target vehicle with ox_target for wheel theft
+function RegisterTargetVehicleWithOxTarget(vehicle, isTargetVehicle)
+    -- Only register if ox_target is enabled
+    if not Config.target.enabled then return end
+    
+    local netId = NetworkGetNetworkIdFromEntity(vehicle)
+    if Contains(targetVehicleNetIds, netId) then return end -- Already registered
+    
+    table.insert(targetVehicleNetIds, netId)
+    
+    -- Define options for the vehicle
+    local options = {}
+    
+    -- If the vehicle is raised, add wheel options
+    if Entity(vehicle).state.IsVehicleRaised then
+        -- Add wheel options
+        local wheelBones = {
+            'wheel_lf', -- Left Front
+            'wheel_rf', -- Right Front
+            'wheel_lr', -- Left Rear
+            'wheel_rr'  -- Right Rear
+        }
+        
+        for i, boneName in ipairs(wheelBones) do
+            local wheelIndex = i - 1
+            local boneIndex = GetEntityBoneIndexByName(vehicle, boneName)
+            
+            if boneIndex ~= -1 then
+                table.insert(options, {
+                    name = 'ls_wheel_theft:steal_wheel_' .. wheelIndex,
+                    icon = 'fas fa-tire',
+                    label = 'Steal Wheel',
+                    bones = {boneName},
+                    canInteract = function()
+                        -- Check if the wheel is still mounted
+                        local _, _, _, isWheelMounted = FindNearestWheel(vehicle)
+                        return isWheelMounted and Entity(vehicle).state.IsVehicleRaised
+                    end,
+                    onSelect = function()
+                        local notified = IsPoliceNotified()
+                        
+                        if notified and Config.dispatch.notifyThief then
+                            StartVehicleAlarm(vehicle)
+                            TriggerDispatch(GetEntityCoords(PlayerPedId()))
+                        end
+                        
+                        StartWheelDismount(vehicle, wheelIndex, false, true, false, not isTargetVehicle)
+                    end
+                })
+            end
+        end
+        
+        -- Add lower vehicle option if this is not a target vehicle
+        if not isTargetVehicle then
+            table.insert(options, {
+                name = 'ls_wheel_theft:lower_vehicle',
+                icon = 'fas fa-arrow-down',
+                label = 'Lower Vehicle',
+                distance = 3.0,
+                canInteract = function()
+                    -- Only show if all wheels are removed
+                    local allWheelsRemoved = true
+                    for i=0, 3 do
+                        local wheelOffset = GetVehicleWheelXOffset(vehicle, i)
+                        if wheelOffset ~= 9999999.0 then
+                            allWheelsRemoved = false
+                            break
+                        end
+                    end
+                    return allWheelsRemoved and Entity(vehicle).state.IsVehicleRaised
+                end,
+                onSelect = function()
+                    local lowered = LowerVehicle(false, true)
+                    while not lowered do
+                        Citizen.Wait(100)
+                    end
+                    SpawnBricksUnderVehicle(vehicle)
+                end
+            })
+        end
+        
+        -- Add finish stealing option if this is a target vehicle
+        if isTargetVehicle then
+            table.insert(options, {
+                name = 'ls_wheel_theft:finish_stealing',
+                icon = 'fas fa-check',
+                label = 'Finish Stealing',
+                distance = 3.0,
+                canInteract = function()
+                    -- Only show if all wheels are removed
+                    local allWheelsRemoved = true
+                    for i=0, 3 do
+                        local wheelOffset = GetVehicleWheelXOffset(vehicle, i)
+                        if wheelOffset ~= 9999999.0 then
+                            allWheelsRemoved = false
+                            break
+                        end
+                    end
+                    return allWheelsRemoved and Entity(vehicle).state.IsVehicleRaised
+                end,
+                onSelect = function()
+                    local lowered = LowerVehicle()
+                    while not lowered do
+                        Citizen.Wait(100)
+                    end
+                    SpawnBricksUnderVehicle(vehicle)
+                    TriggerServerEvent('ls_wheel_theft:RetrieveItem', Config.jackStandName)
+                    if netId and Contains(targetVehicleNetIds, netId) then
+                        exports.ox_target:removeEntity(netId)
+                        for i, v in ipairs(targetVehicleNetIds) do
+                            if v == netId then
+                                table.remove(targetVehicleNetIds, i)
+                                break
+                            end
+                        end
+                    end
+                end
+            })
+        end
+    end
+    
+    -- Only add options if we have any
+    if #options > 0 then
+        exports.ox_target:addEntity(netId, options)
+    end
+end
+
+-- Function to register truck with ox_target for wheel storage
+function RegisterTruckWithOxTarget(vehicle)
+    -- Only register if ox_target is enabled and we're holding a wheel
+    if not Config.target.enabled or not WHEEL_PROP then return end
+    
+    -- Get network ID of the truck
+    local netId = NetworkGetNetworkIdFromEntity(vehicle)
+    
+    -- Don't register if it's already registered
+    if truckNetId == netId then return end
+    
+    truckNetId = netId
+    
+    -- Define options for the truck
+    local options = {
+        {
+            name = 'ls_wheel_theft:store_wheel',
+            icon = 'fas fa-box',
+            label = 'Store Wheel',
+            distance = 3.0,
+            canInteract = function()
+                -- Only show if player is holding a wheel
+                return WHEEL_PROP ~= nil
+            end,
+            onSelect = function()
+                local storedWheel = PutWheelInTruckBed(vehicle, #STORED_WHEELS + 1)
+                DeleteEntity(WHEEL_PROP)
+                ClearPedTasksImmediately(PlayerPedId())
+                table.insert(STORED_WHEELS, storedWheel)
+                WHEEL_PROP = nil
+                
+                -- Remove the truck from ox_target as we no longer need it
+                if truckNetId then
+                    exports.ox_target:removeEntity(truckNetId)
+                    truckNetId = nil
+                end
+            end
+        }
+    }
+    
+    -- Add options to the truck
+    exports.ox_target:addEntity(netId, options)
 end
 
 function BeginWheelLoadingIntoTruck(wheelProp)
@@ -282,8 +477,32 @@ function BeginWheelLoadingIntoTruck(wheelProp)
             end
         end)
     else
-        --target implemenation
-        -- target vehicle, canInteract if carrying wheel prop
+        -- Register the nearest truck with ox_target for wheel storage
+        Citizen.CreateThread(function()
+            while WHEEL_PROP do
+                local sleep = 300
+                local player = PlayerPedId()
+                local playerCoords = GetEntityCoords(player)
+                local vehicle = GetNearestVehicle(playerCoords.x, playerCoords.y, playerCoords.z, 5.0)
+                
+                if vehicle and IsVehicleATruck(vehicle) then
+                    local vehicleCoords = GetEntityCoords(vehicle)
+                    local distance = #(vehicleCoords - playerCoords)
+                    
+                    if distance < 5.0 then
+                        RegisterTruckWithOxTarget(vehicle)
+                    end
+                end
+                
+                Citizen.Wait(sleep)
+            end
+            
+            -- Clean up when wheel is no longer held
+            if truckNetId then
+                exports.ox_target:removeEntity(truckNetId)
+                truckNetId = nil
+            end
+        end)
     end
 end
 
@@ -315,7 +534,74 @@ function EnableWheelTakeOut()
             end
         end)
     else
-        -- Target implementation
+        -- Register trucks that have stored wheels with ox_target
+        Citizen.CreateThread(function()
+            while #STORED_WHEELS > 0 do
+                local sleep = 300
+                local player = PlayerPedId()
+                local playerCoords = GetEntityCoords(player)
+                local vehicle = GetNearestVehicle(playerCoords.x, playerCoords.y, playerCoords.z, 5.0)
+                
+                if vehicle and IsVehicleATruck(vehicle) then
+                    local vehicleCoords = GetEntityCoords(vehicle)
+                    local distance = #(vehicleCoords - playerCoords)
+                    
+                    if distance < 5.0 and not HOLDING_WHEEL then
+                        -- Register the truck for wheel retrieval
+                        local netId = NetworkGetNetworkIdFromEntity(vehicle)
+                        
+                        -- Don't register if it's already registered
+                        if truckNetId ~= netId then
+                            -- If there was a previously registered truck, remove it
+                            if truckNetId then
+                                exports.ox_target:removeEntity(truckNetId)
+                            end
+                            
+                            truckNetId = netId
+                            
+                            -- Define options for the truck
+                            local options = {
+                                {
+                                    name = 'ls_wheel_theft:take_wheel',
+                                    icon = 'fas fa-hand-holding',
+                                    label = 'Take Wheel Out',
+                                    distance = 3.0,
+                                    canInteract = function()
+                                        -- Only show if player is not holding a wheel and there are wheels stored
+                                        return not HOLDING_WHEEL and #STORED_WHEELS > 0
+                                    end,
+                                    onSelect = function()
+                                        if not HOLDING_WHEEL and #STORED_WHEELS > 0 then
+                                            local wheelProp = PutWheelInHands()
+                                            HOLDING_WHEEL = wheelProp
+                                            DeleteEntity(STORED_WHEELS[#STORED_WHEELS])
+                                            table.remove(STORED_WHEELS, #STORED_WHEELS)
+                                            
+                                            -- If there are no more wheels, clean up the target
+                                            if #STORED_WHEELS == 0 and truckNetId then
+                                                exports.ox_target:removeEntity(truckNetId)
+                                                truckNetId = nil
+                                            end
+                                        end
+                                    end
+                                }
+                            }
+                            
+                            -- Add options to the truck
+                            exports.ox_target:addEntity(netId, options)
+                        end
+                    end
+                end
+                
+                Citizen.Wait(sleep)
+            end
+            
+            -- Clean up when no more wheels are stored
+            if truckNetId then
+                exports.ox_target:removeEntity(truckNetId)
+                truckNetId = nil
+            end
+        end)
     end
 end
 
@@ -364,3 +650,32 @@ if Config.command.enabled then
         TriggerServerEvent('ls_wheel_theft:ResetPlayerState', NetworkGetNetworkIdFromEntity(PlayerPedId()))
     end)
 end
+
+-- Add a resource stop handler to ensure the work vehicle is cleaned up
+AddEventHandler('onResourceStop', function(resourceName)
+    if GetCurrentResourceName() == resourceName then
+        -- Clean up work vehicle when resource stops
+        -- This is a safety measure to prevent vehicles from being left in the world if the script is stopped
+        -- Normal despawning should happen through the CancelMission function when players cancel at the NPC
+        if WORK_VEHICLE and DoesEntityExist(WORK_VEHICLE) then
+            SetEntityAsMissionEntity(WORK_VEHICLE, true, true)
+            DeleteVehicle(WORK_VEHICLE)
+            WORK_VEHICLE = nil
+        end
+        
+        -- Clean up all ox_target entities
+        if Config.target.enabled then
+            -- Clean up all registered target vehicles
+            for _, netId in ipairs(targetVehicleNetIds) do
+                exports.ox_target:removeEntity(netId)
+            end
+            targetVehicleNetIds = {}
+            
+            -- Clean up truck if registered
+            if truckNetId then
+                exports.ox_target:removeEntity(truckNetId)
+                truckNetId = nil
+            end
+        end
+    end
+end)

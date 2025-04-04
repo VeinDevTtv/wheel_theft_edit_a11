@@ -65,8 +65,8 @@ Config.job = {
 --- PLACEHOLDER - TARGET IS NOT IMPLEMENTED INTO THE SCRIPT
 --- Comments are placed in the script files, so you can see where to add target if you wish to :)
 Config.target = {
-    enabled = false,
-    system = 'ox-target'
+    enabled = true, -- Whether to enable the target system
+    system = 'ox_target' -- Target system to use - currently only supports 'ox_target'
 }
 
 -------------------------------------------------

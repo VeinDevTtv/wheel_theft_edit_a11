@@ -5,6 +5,9 @@ author 'Lith Studios | Swizz'
 description 'Wheel Theft by Lith Studios'
 version '1.2.3'
 
+-- Add dependency for ox_target
+dependency 'ox_target'
+
 --
 -- Server
 --
