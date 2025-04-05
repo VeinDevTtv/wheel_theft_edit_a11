@@ -115,47 +115,37 @@ function RegisterSellerPedWithOxTarget(sellerPed)
     -- Get network ID for tracking
     sellerPedNetId = NetworkGetNetworkIdFromEntity(sellerPed)
     
-    -- Get seller ped model for model-based targeting
-    local pedModel = GetEntityModel(sellerPed)
-    
     -- Clear any existing targets for this entity to prevent duplicates
-    exports.ox_target:removeEntity(sellerPedNetId)
-    exports.ox_target:removeModel(pedModel)
+    if sellerPedNetId then
+        exports.ox_target:removeEntity(sellerPedNetId)
+    end
     
     -- Create options for the seller ped
     local options = {
         {
-            name = 'ls_wheel_theft:sell_wheels',
+            name = 'ls_wheel_theft:complete_sale',
             icon = 'fas fa-dollar-sign',
-            label = 'Sell Wheels',
+            label = 'Complete Sale',
             canInteract = function()
-                -- Only show this option if we're on a mission and have wheels
-                if not MISSION_ACTIVATED then return false end
-                
-                -- Check if player has wheels in inventory
-                local hasWheels = false
-                QBCore.Functions.TriggerCallback('QBCore:HasItem', function(result)
-                    hasWheels = result
-                end, Settings.wheelTakeOff.item)
-                
-                Citizen.Wait(100) -- Brief wait for callback
-                return hasWheels
+                -- Only show when all 4 wheels are in the crate
+                return #storedWheels == 4
             end,
             onSelect = function()
                 if not cooldown then
                     SetCooldown(3000)
-                    TriggerServerEvent('ls_wheel_theft:server:RemoveWheel')
-                    HOLDING_WHEEL = nil
-                    ClearPedTasks(PlayerPedId())
-                    -- Set up a drop-off point for wheels
-                    CreateWheelDropOffPoint()
+                    CompleteSale(sellerPed)
                 end
             end
         }
     }
     
-    -- Register with ox_target using model-based targeting (more reliable)
-    exports.ox_target:addModel(pedModel, options)
+    -- Debug info
+    QBCore.Functions.Notify('Registering seller with target system (NetID: ' .. sellerPedNetId .. ')', 'primary', 2000)
+    
+    -- Register with ox_target using just the entity
+    exports.ox_target:addLocalEntity(sellerPed, options)
+    
+    QBCore.Functions.Notify('Seller is ready. Drop off all wheels in the crate, then talk to the seller.', 'success', 5000)
 end
 
 function RegisterCrateWithOxTarget(crateProp)
@@ -164,12 +154,10 @@ function RegisterCrateWithOxTarget(crateProp)
     -- Get network ID for tracking
     cratePropNetId = NetworkGetNetworkIdFromEntity(crateProp)
     
-    -- Get crate model for model-based targeting
-    local crateModel = GetEntityModel(crateProp)
-    
     -- Clear any existing targets for this entity to prevent duplicates
-    exports.ox_target:removeEntity(cratePropNetId)
-    exports.ox_target:removeModel(crateModel)
+    if cratePropNetId then
+        exports.ox_target:removeEntity(cratePropNetId)
+    end
     
     -- Create options for the crate
     local options = {
@@ -186,70 +174,50 @@ function RegisterCrateWithOxTarget(crateProp)
                     SetCooldown(3000)
                     DropOffWheel(crateProp, #storedWheels + 1)
                     
-                    -- If all wheels are dropped off (4 wheels), enable the complete sale option
-                    if #storedWheels == 4 then
-                        -- Re-register the entity with the complete sale option
-                        RegisterCompleteSaleOption(crateProp)
+                    -- Notify the player about remaining wheels
+                    if #storedWheels < 4 then
+                        QBCore.Functions.Notify('You need to drop off ' .. (4 - #storedWheels) .. ' more wheels.', 'primary', 3000)
+                    else
+                        QBCore.Functions.Notify('All wheels dropped off! Talk to the seller to complete the sale.', 'success', 5000)
                     end
                 end
             end
         }
     }
     
-    -- Register with ox_target
-    exports.ox_target:addModel(crateModel, options)
+    -- Debug info
+    QBCore.Functions.Notify('Registering crate with target system (NetID: ' .. cratePropNetId .. ')', 'primary', 2000)
+    
+    -- Register with ox_target using local entity
+    exports.ox_target:addLocalEntity(crateProp, options)
 end
 
 function RegisterCompleteSaleOption(crateProp)
-    if not crateProp or not DoesEntityExist(crateProp) then return end
-    
-    -- Get network ID for tracking
-    cratePropNetId = NetworkGetNetworkIdFromEntity(crateProp)
-    
-    -- Get crate model for model-based targeting
-    local crateModel = GetEntityModel(crateProp)
-    
-    -- Create options for the crate
-    local options = {
-        {
-            name = 'ls_wheel_theft:complete_sale',
-            icon = 'fas fa-check-circle',
-            label = 'Complete Sale',
-            canInteract = function()
-                -- Only show if we have all 4 wheels in the crate
-                return #storedWheels == 4
-            end,
-            onSelect = function()
-                if not cooldown then
-                    SetCooldown(3000)
-                    CompleteSale()
-                end
-            end
-        }
-    }
-    
-    -- Add new option to existing target
-    exports.ox_target:addModel(crateModel, options)
+    -- This function is no longer needed as we're using only entity-based targeting
+    -- This is here just as a placeholder to avoid breaking any existing calls
+    -- The complete sale option is now handled directly with the seller ped
 end
 
 function CompleteSale(sellerPed)
     saleActive = false
     
-    -- Perform sell animation but don't trigger the separate payment event
+    -- Play animation for selling
     local playerPed = PlayerPedId()
-    TaskTurnPedToFaceEntity(playerPed, sellerPed, 1000)
-    Citizen.Wait(1000)
-    
-    PlayAnim('mp_common', 'givetake2_b', 0, sellerPed)
-    PlayAnim('mp_common', 'givetake1_a')
-    
-    Citizen.Wait(1000)
-    
-    ClearPedTasks(playerPed)
-    TaskStartScenarioInPlace(sellerPed, "WORLD_HUMAN_GUARD_STAND", 0, true)
+    if sellerPed and DoesEntityExist(sellerPed) then
+        TaskTurnPedToFaceEntity(playerPed, sellerPed, 1000)
+        Citizen.Wait(1000)
+        
+        PlayAnim('mp_common', 'givetake2_b', 0, sellerPed)
+        PlayAnim('mp_common', 'givetake1_a')
+        
+        Citizen.Wait(1000)
+        
+        ClearPedTasks(playerPed)
+        TaskStartScenarioInPlace(sellerPed, "WORLD_HUMAN_GUARD_STAND", 0, true)
+    end
 
-    -- Delete the seller ped
-    if DoesEntityExist(sellerPed) then
+    -- Delete the seller ped if it exists
+    if sellerPed and DoesEntityExist(sellerPed) then
         DeleteEntity(sellerPed)
     end
 
@@ -261,39 +229,31 @@ function CompleteSale(sellerPed)
     end
     storedWheels = {}
     
-    -- Clean up ox_target if it's enabled
+    -- Clean up targeting
     if Config.target.enabled then
-        -- Clean up model targeting
-        local sellerModel = GetEntityModel(sellerPed)
-        local crateModel = nil
-        
-        if Config.missionPeds and Config.missionPeds['sale_ped'] and Config.missionPeds['sale_ped'].wheelDropOff then
-            crateModel = GetHashKey(Config.missionPeds['sale_ped'].wheelDropOff.crateProp)
-            exports.ox_target:removeModel(crateModel)
-        end
-        
-        exports.ox_target:removeModel(sellerModel)
-        
-        -- Also try to clean up entity targets if they exist
         if sellerPedNetId then
             exports.ox_target:removeEntity(sellerPedNetId)
+            sellerPedNetId = nil
         end
         
         if cratePropNetId then
             exports.ox_target:removeEntity(cratePropNetId)
+            cratePropNetId = nil
         end
     end
 
-    RemoveBlip(sellerBlip)
-    sellerPedNetId = nil
-    cratePropNetId = nil
+    -- Clean up blips
+    if sellerBlip and DoesBlipExist(sellerBlip) then
+        RemoveBlip(sellerBlip)
+        sellerBlip = nil
+    end
     
-    -- Set payment and mission states
+    -- Set mission states
     LocalPlayer.state.AlreadyPaid = true
     LocalPlayer.state.MissionCompleted = true
     
-    -- Make server-side payment (only one payment method)
-    TriggerServerEvent('ls_wheel_theft:server:CompleteSale', #storedWheels)
+    -- Make server-side payment
+    TriggerServerEvent('ls_wheel_theft:server:CompleteSale', 4)  -- Always pay for 4 wheels
     
     QBCore.Functions.Notify('Sale completed! Return to the mission giver to finish the job.', 'success', 8000)
     
@@ -324,21 +284,19 @@ end
 -- Event to remove the entities from ox_target when the resource stops
 AddEventHandler('onResourceStop', function(resourceName)
     if GetCurrentResourceName() == resourceName and Config.target.enabled then
-        -- Clean up any model targets to prevent issues on resource restart
-        -- These should be the models used by the seller and crate
-        local sellerModel = GetHashKey(Config.missionPeds['sale_ped'].pedModel)
-        local crateModel = GetHashKey(Config.missionPeds['sale_ped'].wheelDropOff.crateProp)
-        
-        exports.ox_target:removeModel(sellerModel)
-        exports.ox_target:removeModel(crateModel)
-        
-        -- Also try to clean up entity-based targets if they exist
+        -- Clean up entity-based targets
         if sellerPedNetId then
-            exports.ox_target:removeEntity(sellerPedNetId)
+            local sellerPed = NetworkGetEntityFromNetworkId(sellerPedNetId)
+            if DoesEntityExist(sellerPed) then
+                exports.ox_target:removeLocalEntity(sellerPed)
+            end
         end
         
         if cratePropNetId then
-            exports.ox_target:removeEntity(cratePropNetId)
+            local crateProp = NetworkGetEntityFromNetworkId(cratePropNetId)
+            if DoesEntityExist(crateProp) then
+                exports.ox_target:removeLocalEntity(crateProp)
+            end
         end
     end
 end)

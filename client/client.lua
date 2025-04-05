@@ -626,7 +626,29 @@ function EnableWheelTakeOut()
 end
 
 function StartWheelDismount(vehicle, wheelIndex, mount, TaskPlayerGoToWheel, coordsTable, disableWheelProp)
-    local success = exports['ls_bolt_minigame']:BoltMinigame(vehicle, wheelIndex, mount, TaskPlayerGoToWheel, coordsTable)
+    local success = true
+    
+    -- Check if bolt minigame resource exists and try to use it
+    if GetResourceState('ls_bolt_minigame') == 'started' then
+        -- Use pcall to safely try the export
+        local status, result = pcall(function() 
+            return exports['ls_bolt_minigame']:BoltMinigame(vehicle, wheelIndex, mount, TaskPlayerGoToWheel, coordsTable)
+        end)
+        
+        if status then
+            success = result
+        else
+            -- Export failed, notify and continue
+            QBCore.Functions.Notify('Bolt minigame resource error, skipping...', 'primary', 3000)
+            -- Still continue with wheel removal
+            success = true
+        end
+    else
+        -- Resource not available, just simulate wheel removal
+        QBCore.Functions.Notify('Removing wheel...', 'primary', 2000)
+        -- Add a small delay to simulate the minigame
+        Citizen.Wait(1500)
+    end
 
     if success and not disableWheelProp then
         SetVehicleWheelXOffset(vehicle, wheelIndex, 9999999.0)
