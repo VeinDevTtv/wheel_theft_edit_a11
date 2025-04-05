@@ -376,11 +376,7 @@ function SpawnBricksUnderVehicle(vehicle)
     
     -- Don't mark entities as no longer needed - this allows the game to clean them up automatically
     -- We want to keep them until we explicitly delete them
-    -- for k=1, #bricks, 1 do
-    --     SetEntityAsNoLongerNeeded(bricks[k])
-    -- end
     
-    QBCore.Functions.Notify('Created ' .. #MISSION_BRICKS .. ' brick props', 'primary', 3000)
     return bricks
 end
 

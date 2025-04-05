@@ -716,13 +716,14 @@ function CleanupMissionVehicle()
             -- Delete the vehicle if it still exists
             if TARGET_VEHICLE and DoesEntityExist(TARGET_VEHICLE) then
                 -- Delete all brick props
-                if #MISSION_BRICKS > 0 then
+                if MISSION_BRICKS and #MISSION_BRICKS > 0 then
+                    local brickCount = 0
                     for k, brick in pairs(MISSION_BRICKS) do
                         if DoesEntityExist(brick) then
                             DeleteEntity(brick)
+                            brickCount = brickCount + 1
                         end
                     end
-                    QBCore.Functions.Notify('Removed all bricks', 'success', 3000)
                     MISSION_BRICKS = {}
                 end
                 
@@ -770,4 +771,27 @@ function RestoreWheelsForNewMission(vehicle)
     end
     
     return false
+end
+
+RegisterNetEvent('QBCore:Client:OnPlayerLoaded')
+AddEventHandler('QBCore:Client:OnPlayerLoaded', function()
+    QBCore.Functions.GetPlayerData(function(PlayerData)
+        if PlayerData.job then
+            PLAYER_JOB = PlayerData.job.name
+        end
+    end)
+end)
+
+-- Function to check if entity is a car
+function IsCar(entity)
+    if not DoesEntityExist(entity) or not IsEntityAVehicle(entity) then
+        return false
+    end
+
+    local entityModel = GetEntityModel(entity)
+    if IsThisModelACar(entityModel) then
+        return true
+    else
+        return false
+    end
 end

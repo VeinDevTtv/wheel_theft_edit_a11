@@ -184,6 +184,18 @@ function CancelMission()
     end
 end
 
+-- Event to remove the ped from ox_target when the resource stops
+AddEventHandler('onResourceStop', function(resourceName)
+    if GetCurrentResourceName() == resourceName then
+        -- Clean up the ped from ox_target when resource stops
+        if missionPedObject and DoesEntityExist(missionPedObject) then
+            -- Remove the entity from ox_target using the object reference
+            exports.ox_target:removeLocalEntity(missionPedObject)
+        end
+    end
+end)
+
+-- Consolidate cooldown function to be used by all scripts
 function SetCooldown(time)
     cooldown = true
     Citizen.CreateThread(function()
@@ -192,98 +204,11 @@ function SetCooldown(time)
     end)
 end
 
--- Event to remove the ped from ox_target when the resource stops
-AddEventHandler('onResourceStop', function(resourceName)
-    if GetCurrentResourceName() == resourceName then
-        -- Clean up the ped from ox_target when resource stops
-        if missionPedObject and DoesEntityExist(missionPedObject) then
-            -- Remove the entity from ox_target using the object reference
-            exports.ox_target:removeLocalEntity(missionPedObject)
-            QBCore.Functions.Notify('Cleaned up mission ped from ox_target', 'primary', 5000)
-        end
-    end
-end)
-
--- Debug command to directly start a mission
-RegisterCommand('startWheelTheft', function()
-    QBCore.Functions.Notify('Starting wheel theft mission via debug command', 'primary', 5000)
-    StartMission()
-end, false)
-
--- Debug command to test jackstand functionality directly
-RegisterCommand('testJackstand', function()
-    -- Spawn a vehicle nearby if none exists
-    local playerPed = PlayerPedId()
-    local playerCoords = GetEntityCoords(playerPed)
-    
-    local vehicle = GetClosestVehicle(playerCoords.x, playerCoords.y, playerCoords.z, 10.0, 0, 71)
-    
-    if not vehicle or not DoesEntityExist(vehicle) then
-        -- No vehicle nearby, spawn one
-        QBCore.Functions.Notify('No vehicle found nearby, spawning test vehicle', 'primary', 3000)
-        
-        local modelHash = GetHashKey('sultanrs') -- Use a car from your config
-        
-        RequestModel(modelHash)
-        local modelTimeout = 10000
-        while not HasModelLoaded(modelHash) and modelTimeout > 0 do
-            Citizen.Wait(100)
-            modelTimeout = modelTimeout - 100
-        end
-        
-        if HasModelLoaded(modelHash) then
-            -- Spawn vehicle 5 meters in front of player
-            local heading = GetEntityHeading(playerPed)
-            local forwardX = math.sin(math.rad(-heading)) * 5.0
-            local forwardY = math.cos(math.rad(-heading)) * 5.0
-            
-            vehicle = CreateVehicle(modelHash, playerCoords.x + forwardX, playerCoords.y + forwardY, playerCoords.z, heading, true, false)
-            
-            -- Set as mission entity so it can be deleted
-            SetEntityAsMissionEntity(vehicle, true, true)
-            
-            -- Set as target vehicle
-            TARGET_VEHICLE = vehicle
-            QBCore.Functions.Notify('Test vehicle spawned and set as TARGET_VEHICLE', 'success', 5000)
-        else
-            QBCore.Functions.Notify('Failed to load vehicle model', 'error', 5000)
-            return
-        end
-    else
-        -- Use existing vehicle as target
-        TARGET_VEHICLE = vehicle
-        QBCore.Functions.Notify('Using nearby vehicle as TARGET_VEHICLE', 'success', 3000)
-    end
-    
-    -- Give player a jackstand
-    TriggerServerEvent('QBCore:Server:AddItem', Config.jackStandName, 1)
-    QBCore.Functions.Notify('Added a jackstand to your inventory', 'success', 3000)
-    
-    -- Show instructions
-    QBCore.Functions.Notify('Use the jackstand from your inventory near the target vehicle', 'primary', 10000)
-end, false)
-
--- Debug command to show target vehicle location
-RegisterCommand('targetVehicleInfo', function()
-    if TARGET_VEHICLE then
-        local coords = GetEntityCoords(TARGET_VEHICLE)
-        QBCore.Functions.Notify('Target vehicle coords: ' .. coords.x .. ', ' .. coords.y .. ', ' .. coords.z, 'primary', 10000)
-        -- Set a waypoint to the target vehicle
-        SetNewWaypoint(coords.x, coords.y)
-    else
-        QBCore.Functions.Notify('No target vehicle exists. Start a mission first!', 'error', 5000)
-    end
-end, false)
-
 -- Event handler to refresh mission ped targeting options
 RegisterNetEvent('ls_wheel_theft:client:refreshMissionPed')
 AddEventHandler('ls_wheel_theft:client:refreshMissionPed', function()
     -- Only process if we have a mission ped and it's valid
     if missionPedObject and DoesEntityExist(missionPedObject) then
-        -- Re-register the ped with ox_target to refresh options
-        local pedModel = GetEntityModel(missionPedObject)
-        exports.ox_target:removeModel(pedModel)
-        Citizen.Wait(200)
         RegisterPedWithOxTarget(missionPedObject)
     end
 end)

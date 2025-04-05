@@ -1,5 +1,6 @@
 Config = {}
 
+-- Master debug toggle - set to false in production
 Config.debug = false
 
 -- Enabling this will let players lift the car up by using a `/...` command
@@ -327,5 +328,5 @@ Settings.wheelTakeOff = {
     }
 }
 
--- Add support for ox_lib context menu
-Config.useOxLib = true -- Set to true if ox_lib is available on your server
+-- Support for ox_lib context menu (disable if it causes errors)
+Config.useOxLib = false
