@@ -1,5 +1,6 @@
 local waitTime = 5
 local height = 0.18
+local targetVehicleNetIds = {} -- Initialize at the top of the file to avoid nil references
 -----------------------------------------------------------------------------------------------------------------------------------------------------
 -- Function to check if vehicle is a car
 -----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -92,6 +93,14 @@ function RaiseCar()
         end
 
         QBCore.Functions.Notify('Starting vehicle lift process...', 'success', 2000)
+        
+        -- Store whether this is the mission target vehicle
+        local isMissionTargetVehicle = (vehicle == TARGET_VEHICLE)
+        if isMissionTargetVehicle then
+            QBCore.Functions.Notify('This is the mission target vehicle!', 'success', 3000)
+            -- Store the info directly on the vehicle entity state
+            Entity(vehicle).state.IsMissionTarget = true
+        end
         
         -- Properly play animation with TaskPlayAnim and freeze player
         local animDict = "mini@repair"
@@ -238,8 +247,7 @@ function RaiseCar()
                 -- Wait a moment to ensure the vehicle state is updated
                 Citizen.Wait(500)
                 -- Check if this is the target vehicle or a regular vehicle
-                local isTargetVehicle = (vehicle == TARGET_VEHICLE)
-                RegisterTargetVehicleWithOxTarget(vehicle, isTargetVehicle)
+                RegisterTargetVehicleWithOxTarget(vehicle)
                 QBCore.Functions.Notify('Wheels are now available for theft', 'primary', 3000)
             end
         end)
@@ -282,7 +290,7 @@ if not targetVehicleNetIds then
     targetVehicleNetIds = {}
 end
 
-function RegisterTargetVehicleWithOxTarget(vehicle, isTargetVehicle)
+function RegisterTargetVehicleWithOxTarget(vehicle)
     if not Config.target.enabled then return end
     if not vehicle or not DoesEntityExist(vehicle) then return end
     
@@ -294,6 +302,13 @@ function RegisterTargetVehicleWithOxTarget(vehicle, isTargetVehicle)
         QBCore.Functions.Notify('Vehicle must be raised to register wheels', 'error', 3000)
         return
     end
+    
+    -- Clear any existing target options for this vehicle to prevent duplicates
+    exports.ox_target:removeEntity(netId)
+    
+    -- Check if this is the mission target vehicle
+    local isTargetVehicle = (vehicle == TARGET_VEHICLE) or Entity(vehicle).state.IsMissionTarget
+    QBCore.Functions.Notify('Debug: Is mission target? ' .. tostring(isTargetVehicle), 'primary', 3000)
     
     -- Define wheel bone names and indices
     local wheels = {
@@ -325,54 +340,10 @@ function RegisterTargetVehicleWithOxTarget(vehicle, isTargetVehicle)
         })
     end
     
-    -- Add lower vehicle option to finish the theft
-    table.insert(options, {
-        name = 'wheel_theft_finish',
-        icon = 'fas fa-check',
-        label = 'Finish Wheel Theft',
-        distance = 2.5,
-        canInteract = function()
-            -- Only show if all wheels are removed
-            local allWheelsRemoved = true
-            for i=0, 3 do
-                local wheelOffset = GetVehicleWheelXOffset(vehicle, i)
-                if wheelOffset ~= 9999999.0 then
-                    allWheelsRemoved = false
-                    break
-                end
-            end
-            return allWheelsRemoved and Entity(vehicle).state.IsVehicleRaised
-        end,
-        onSelect = function()
-            -- Lower the vehicle and retrieve jackstand
-            QBCore.Functions.Notify('Finishing wheel theft...', 'primary', 3000)
-            local lowered = LowerVehicle(false, true)
-            Citizen.Wait(1000)
-            SpawnBricksUnderVehicle(vehicle)
-            TriggerServerEvent('ls_wheel_theft:RetrieveItem', Config.jackStandName)
-            QBCore.Functions.Notify('Jack stand retrieved!', 'success', 5000)
-            
-            -- Remove the vehicle from targeting
-            if netId then
-                exports.ox_target:removeEntity(netId)
-                for i, v in ipairs(targetVehicleNetIds) do
-                    if v == netId then
-                        table.remove(targetVehicleNetIds, i)
-                        break
-                    end
-                end
-            end
-            
-            -- If this is the target vehicle, prompt to proceed to seller
-            if vehicle == TARGET_VEHICLE then
-                QBCore.Functions.Notify('Head to the wheel seller to complete the mission!', 'primary', 8000)
-                EnableSale()
-            end
-        end
-    })
-    
-    -- Add finish stealing option if this is a target vehicle
+    -- For target vehicles, only add the Finish Stealing option
+    -- For non-target vehicles, add the simple finish option
     if isTargetVehicle then
+        -- This is the target vehicle from the mission
         table.insert(options, {
             name = 'ls_wheel_theft:finish_stealing',
             icon = 'fas fa-check',
@@ -388,7 +359,19 @@ function RegisterTargetVehicleWithOxTarget(vehicle, isTargetVehicle)
                         break
                     end
                 end
-                return allWheelsRemoved and Entity(vehicle).state.IsVehicleRaised
+                
+                -- Debug notifications to check conditions
+                local isVehicleRaised = Entity(vehicle).state.IsVehicleRaised
+                QBCore.Functions.Notify('Debug: All wheels removed: ' .. tostring(allWheelsRemoved) .. ' | Vehicle raised: ' .. tostring(isVehicleRaised), 'primary', 3000)
+                
+                -- Extra debug to confirm this is the target vehicle
+                if vehicle == TARGET_VEHICLE then
+                    QBCore.Functions.Notify('Debug: This is the target vehicle!', 'success', 3000)
+                else
+                    QBCore.Functions.Notify('Debug: This is NOT the target vehicle!', 'error', 3000)
+                end
+                
+                return allWheelsRemoved and isVehicleRaised
             end,
             onSelect = function()
                 local lowered = LowerVehicle()
@@ -426,6 +409,46 @@ function RegisterTargetVehicleWithOxTarget(vehicle, isTargetVehicle)
                 
                 -- Schedule vehicle cleanup
                 CleanupMissionVehicle()
+            end
+        })
+    else
+        -- This is a regular vehicle, not the target vehicle
+        table.insert(options, {
+            name = 'wheel_theft_finish',
+            icon = 'fas fa-check',
+            label = 'Retrieve Jackstand',
+            distance = 2.5,
+            canInteract = function()
+                -- Only show if all wheels are removed
+                local allWheelsRemoved = true
+                for i=0, 3 do
+                    local wheelOffset = GetVehicleWheelXOffset(vehicle, i)
+                    if wheelOffset ~= 9999999.0 then
+                        allWheelsRemoved = false
+                        break
+                    end
+                end
+                return allWheelsRemoved and Entity(vehicle).state.IsVehicleRaised
+            end,
+            onSelect = function()
+                -- Lower the vehicle and retrieve jackstand
+                QBCore.Functions.Notify('Finishing wheel theft...', 'primary', 3000)
+                local lowered = LowerVehicle(false, true)
+                Citizen.Wait(1000)
+                SpawnBricksUnderVehicle(vehicle)
+                TriggerServerEvent('ls_wheel_theft:RetrieveItem', Config.jackStandName)
+                QBCore.Functions.Notify('Jack stand retrieved!', 'success', 5000)
+                
+                -- Remove the vehicle from targeting
+                if netId then
+                    exports.ox_target:removeEntity(netId)
+                    for i, v in ipairs(targetVehicleNetIds) do
+                        if v == netId then
+                            table.remove(targetVehicleNetIds, i)
+                            break
+                        end
+                    end
+                end
             end
         })
     end

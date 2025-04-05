@@ -131,3 +131,12 @@ AddEventHandler('ls_wheel_theft:server:CompleteSale', function(wheelCount)
     -- Notify the player
     TriggerClientEvent('QBCore:Notify', _source, 'You received $'..totalPay..' for selling '..wheelCount..' wheels!', 'success', 5000)
 end)
+
+-- Event handler to refresh mission ped targeting options
+RegisterServerEvent('ls_wheel_theft:server:refreshMissionPed')
+AddEventHandler('ls_wheel_theft:server:refreshMissionPed', function()
+    local _source = source
+    
+    -- Broadcast to all clients to refresh mission ped (including the source client)
+    TriggerClientEvent('ls_wheel_theft:client:refreshMissionPed', -1, _source)
+end)

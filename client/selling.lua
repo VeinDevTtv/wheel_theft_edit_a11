@@ -312,8 +312,15 @@ function CompleteSale(sellerPed)
     
     -- Mark mission as completed but pending final turn-in
     -- This will trigger the "Finish Mission" option at the mission giver
-    Player(PlayerId()).state.MissionCompleted = true
     LocalPlayer.state.MissionCompleted = true
+    
+    -- Ensure mission completion status is set properly and synchronized
+    SetTimeout(500, function()
+        -- Force refresh state after a short delay
+        LocalPlayer.state.MissionCompleted = true
+        QBCore.Functions.Notify('Mission state set to completed', 'success', 1000)
+    end)
+    
     QBCore.Functions.Notify('Sale completed! Return to the mission giver to finish the job.', 'success', 8000)
     
     -- Create a blip to guide the player back to the mission giver
@@ -325,9 +332,11 @@ function CompleteSale(sellerPed)
         SetBlipRoute(missionBlip, true)
     end
     
-    -- Store the blip ID in both states to ensure it's accessible
-    Player(PlayerId()).state.ReturnBlip = missionBlip
+    -- Store the blip ID in the state to ensure it's accessible
     LocalPlayer.state.ReturnBlip = missionBlip
+    
+    -- Trigger a server event to refresh targeting options on the mission ped
+    TriggerServerEvent('ls_wheel_theft:server:refreshMissionPed')
     
     -- Keep the target vehicle - don't cancel the mission yet
     -- CancelMission() will be called when the player returns to the mission giver

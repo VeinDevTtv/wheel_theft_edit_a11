@@ -42,21 +42,20 @@ end
 -- Function bach n'registeri ped f ox_target
 function RegisterPedWithOxTarget(ped)
     -- Debug notification
-    QBCore.Functions.Notify('Attempting to register NPC with ox_target', 'primary', 5000)
-    
-    -- Ensure LocalPlayer.state is initialized
-    if not LocalPlayer.state then
-        LocalPlayer.state = {}
-    end
-    
-    -- Initialize the mission completion state if needed
-    if LocalPlayer.state.MissionCompleted == nil then
-        LocalPlayer.state.MissionCompleted = false
-        QBCore.Functions.Notify('Initializing mission state to false', 'primary', 2000)
-    end
+    QBCore.Functions.Notify('Registering mission NPC with ox_target', 'primary', 1000)
     
     -- Store the actual ped for removal later
     missionPedObject = ped
+    
+    -- Force checking LocalPlayer.state
+    local missionCompleted = LocalPlayer.state.MissionCompleted
+    if missionCompleted == nil then
+        LocalPlayer.state.MissionCompleted = false
+        missionCompleted = false
+    end
+    
+    -- Debug: Show current mission state
+    QBCore.Functions.Notify('Current mission state: ' .. tostring(missionCompleted), 'primary', 1000)
     
     -- Clear any existing targets for this ped to prevent duplicates
     local pedModel = GetEntityModel(ped)
@@ -74,7 +73,12 @@ function RegisterPedWithOxTarget(ped)
             label = 'Start Wheel Theft Mission',
             canInteract = function()
                 -- Only show this option if not in a mission and not completed mission
-                return not MISSION_ACTIVATED and not LocalPlayer.state.MissionCompleted
+                local isActive = MISSION_ACTIVATED
+                local isCompleted = LocalPlayer.state.MissionCompleted
+                
+                QBCore.Functions.Notify('Start option check: Active=' .. tostring(isActive) .. ', Completed=' .. tostring(isCompleted), 'primary', 1000)
+                
+                return not isActive and not isCompleted
             end,
             onSelect = function()
                 if not cooldown then
@@ -89,7 +93,12 @@ function RegisterPedWithOxTarget(ped)
             label = 'Cancel Mission',
             canInteract = function()
                 -- Only show this option if already in a mission and not completed
-                return MISSION_ACTIVATED and not LocalPlayer.state.MissionCompleted
+                local isActive = MISSION_ACTIVATED 
+                local isCompleted = LocalPlayer.state.MissionCompleted
+                
+                QBCore.Functions.Notify('Cancel option check: Active=' .. tostring(isActive) .. ', Completed=' .. tostring(isCompleted), 'primary', 1000)
+                
+                return isActive and not isCompleted
             end,
             onSelect = function()
                 if not cooldown then
@@ -104,7 +113,16 @@ function RegisterPedWithOxTarget(ped)
             label = 'Finish Wheel Theft Job',
             canInteract = function()
                 -- Only show this option if the mission is completed (wheels sold)
-                return LocalPlayer.state.MissionCompleted == true
+                local isCompleted = LocalPlayer.state.MissionCompleted
+                
+                -- Force check the state again 
+                if isCompleted == nil then
+                    isCompleted = false
+                end
+                
+                QBCore.Functions.Notify('Finish option check: Completed=' .. tostring(isCompleted), 'primary', 1000)
+                
+                return isCompleted == true
             end,
             onSelect = function()
                 if not cooldown then
@@ -159,7 +177,7 @@ function RegisterPedWithOxTarget(ped)
     -- Choose only ONE registration method - model is more reliable
     exports.ox_target:addModel(pedModel, options)
     
-    QBCore.Functions.Notify('NPC registered with ox_target using model only', 'success', 5000)
+    QBCore.Functions.Notify('NPC registered with ox_target - model: ' .. pedModel, 'success', 3000)
 end
 
 -- Helper function to get all active blips
@@ -312,6 +330,37 @@ RegisterCommand('targetVehicleInfo', function()
         SetNewWaypoint(coords.x, coords.y)
     else
         QBCore.Functions.Notify('No target vehicle exists. Start a mission first!', 'error', 5000)
+    end
+end, false)
+
+-- Event handler to refresh mission ped targeting options
+RegisterNetEvent('ls_wheel_theft:client:refreshMissionPed')
+AddEventHandler('ls_wheel_theft:client:refreshMissionPed', function(sourcePlayer)
+    -- This is called on all clients
+    
+    -- Only process if we have a mission ped and it's valid
+    if missionPedObject and DoesEntityExist(missionPedObject) then
+        -- Get the ped model
+        local pedModel = GetEntityModel(missionPedObject)
+        
+        -- Remove existing target options to prevent duplicates
+        exports.ox_target:removeModel(pedModel)
+        
+        -- Re-register the ped with ox_target to refresh options
+        Citizen.Wait(500) -- Short delay to ensure cleanup is complete
+        RegisterPedWithOxTarget(missionPedObject)
+        
+        QBCore.Functions.Notify('Mission ped targeting refreshed', 'success', 2000)
+    end
+end)
+
+-- This command allows admin/developers to manually refresh the mission ped targeting
+RegisterCommand('refreshMissionPed', function()
+    if missionPedObject and DoesEntityExist(missionPedObject) then
+        QBCore.Functions.Notify('Manually refreshing mission ped targeting...', 'primary', 3000)
+        TriggerEvent('ls_wheel_theft:client:refreshMissionPed', PlayerId())
+    else
+        QBCore.Functions.Notify('No mission ped found to refresh', 'error', 3000)
     end
 end, false)
 
