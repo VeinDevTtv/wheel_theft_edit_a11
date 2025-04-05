@@ -79,48 +79,30 @@ function RegisterPedWithOxTarget(ped)
             end
         },
         {
-            name = 'ls_wheel_theft:finish_job',
+            name = 'ls_wheel_theft:complete_mission',
             icon = 'fas fa-check-circle',
-            label = 'Finish Wheel Theft Job',
+            label = 'Complete Mission',
             canInteract = function()
                 return LocalPlayer.state.MissionCompleted == true
             end,
             onSelect = function()
                 if not cooldown then
                     SetCooldown(3000)
-                    
-                    -- Create a menu to let player choose what to do
-                    local elements = {
-                        {
-                            title = "Complete Mission",
-                            description = "Finish the mission and clean up everything",
-                            icon = "fas fa-check-double",
-                            onSelect = function()
-                                FinishMissionCompletely()
-                            end
-                        },
-                        {
-                            title = "Start New Mission With Same Vehicle",
-                            description = "Keep the current vehicle and start a new mission",
-                            icon = "fas fa-redo",
-                            onSelect = function()
-                                StartNewMissionWithExistingVehicle()
-                            end
-                        }
-                    }
-                    
-                    -- Display the menu for player choice
-                    -- Check if ox_lib exists for context menu
-                    if Config.useOxLib and exports.ox_lib then
-                        exports.ox_lib:showContext({
-                            id = 'wheel_theft_finish_menu',
-                            title = 'Choose Mission Option',
-                            options = elements
-                        })
-                    else
-                        -- Direct selection without menu (option 1)
-                        FinishMissionCompletely()
-                    end
+                    FinishMissionCompletely()
+                end
+            end
+        },
+        {
+            name = 'ls_wheel_theft:new_mission_same_vehicle',
+            icon = 'fas fa-redo',
+            label = 'New Mission',
+            canInteract = function()
+                return LocalPlayer.state.MissionCompleted == true
+            end,
+            onSelect = function()
+                if not cooldown then
+                    SetCooldown(3000)
+                    StartNewMissionWithExistingVehicle()
                 end
             end
         }
@@ -423,13 +405,14 @@ end
 function StartMissionWithExistingVehicle(vehicle)
     MISSION_ACTIVATED = true
     
-    -- Select a random vehicle model from config for mission data
-    local vehicleModel = Config.missionVehicles[math.random(1, #Config.missionVehicles)]
-    
-    if not vehicleModel then
-        QBCore.Functions.Notify('ERROR: No mission vehicle models found in config', 'error', 5000)
+    -- Verify we have a valid vehicle models array
+    if not Config.vehicleModels or #Config.vehicleModels == 0 then
+        QBCore.Functions.Notify('ERROR: No vehicle models found in config.', 'error', 5000)
         return
     end
+    
+    -- Select a random vehicle model from config for mission data
+    local vehicleModel = Config.vehicleModels[math.random(1, #Config.vehicleModels)]
     
     -- Restore wheels to the vehicle if any were removed
     RestoreWheelsForNewMission(vehicle)
@@ -442,16 +425,40 @@ function StartMissionWithExistingVehicle(vehicle)
     local vehicleCoords = GetEntityCoords(vehicle)
     
     -- Create mission area and blip
-    local radius = Config.missionArea.radius
+    local radius = 100.0 -- Default radius if not defined in config
+    if Config.missionArea and Config.missionArea.radius then
+        radius = Config.missionArea.radius
+    end
+    
     MISSION_AREA = AddBlipForRadius(vehicleCoords.x, vehicleCoords.y, vehicleCoords.z, radius)
     
-    SetBlipColour(MISSION_AREA, Config.missionArea.color)
+    -- Set blip properties with defaults if config values are missing
+    local areaColor = 1 -- Default blue
+    if Config.missionArea and Config.missionArea.color then
+        areaColor = Config.missionArea.color
+    end
+    SetBlipColour(MISSION_AREA, areaColor)
     SetBlipAlpha(MISSION_AREA, 80)
     
     -- Create mission vehicle blip
     MISSION_BLIP = AddBlipForEntity(vehicle)
-    SetBlipSprite(MISSION_BLIP, Config.missionBlip.sprite)
-    SetBlipColour(MISSION_BLIP, Config.missionBlip.color)
+    
+    -- Set blip properties with safe fallbacks
+    local blipSprite = 225 -- Default car sprite
+    local blipColor = 1 -- Default blue
+    
+    if Config.missionBlip then
+        if Config.missionBlip.blipIcon then
+            blipSprite = Config.missionBlip.blipIcon
+        end
+        
+        if Config.missionBlip.blipColor then
+            blipColor = Config.missionBlip.blipColor
+        end
+    end
+    
+    SetBlipSprite(MISSION_BLIP, blipSprite)
+    SetBlipColour(MISSION_BLIP, blipColor)
     SetBlipScale(MISSION_BLIP, 1.0)
     SetBlipDisplay(MISSION_BLIP, 2)
     BeginTextCommandSetBlipName("STRING")
@@ -466,14 +473,21 @@ function StartMissionWithExistingVehicle(vehicle)
     
     QBCore.Functions.Notify('New mission started with the same vehicle! Steal its wheels again.', 'success', 8000)
     
-    -- Alert police after a delay
-    Citizen.CreateThread(function()
-        Citizen.Wait(Config.policeCallTime)
-        
-        if MISSION_ACTIVATED then
-            TriggerDispatch(vehicleCoords)
+    -- Alert police after a delay if that feature is enabled
+    if Config.dispatch and Config.dispatch.enabled then
+        local delayTime = 30000 -- Default 30 seconds
+        if Config.policeCallTime then
+            delayTime = Config.policeCallTime
         end
-    end)
+        
+        Citizen.CreateThread(function()
+            Citizen.Wait(delayTime)
+            
+            if MISSION_ACTIVATED then
+                TriggerDispatch(vehicleCoords)
+            end
+        end)
+    end
 end
 
 CreateMissionPed()
