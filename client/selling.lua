@@ -252,10 +252,10 @@ function CompleteSale(sellerPed)
     LocalPlayer.state.AlreadyPaid = true
     LocalPlayer.state.MissionCompleted = true
     
-    -- Make server-side payment
+    -- Make server-side payment - THIS IS THE ONLY PAYMENT PLAYER WILL RECEIVE
     TriggerServerEvent('ls_wheel_theft:server:CompleteSale', 4)  -- Always pay for 4 wheels
     
-    QBCore.Functions.Notify('Sale completed! Return to the mission giver to finish the job.', 'success', 8000)
+    QBCore.Functions.Notify('Sale completed and payment received! Return to the mission giver to finish the job. (No additional payment will be given)', 'success', 10000)
     
     -- Create a blip to guide the player back to the mission giver
     local missionTable = Config.missionPeds['mission_ped']

@@ -10,14 +10,28 @@ AddEventHandler('ls_wheel_theft:Sell', function(sellingKey)
 end)
 
 RegisterServerEvent('ls_wheel_theft:server:setIsRaised')
-AddEventHandler('ls_wheel_theft:server:setIsRaised', function(netId, raised)
+AddEventHandler('ls_wheel_theft:server:setIsRaised', function(netId, plate, raised)
+    local _source = source
     local veh = NetworkGetEntityFromNetworkId(netId)
 
     if not DoesEntityExist(veh) then
+        TriggerClientEvent('QBCore:Notify', _source, 'Vehicle not found. Try again.', 'error', 5000)
         return
     end
 
+    -- Set vehicle state
     Entity(veh).state.IsVehicleRaised = raised
+    Entity(veh).state.plate = plate
+    
+    -- We can't use SetEntityAsMissionEntity on the server side
+    -- Instead, we'll just set the state and let the client handle entity persistence
+    
+    -- Confirm to the client
+    if raised then
+        TriggerClientEvent('QBCore:Notify', _source, 'Vehicle state set to raised', 'success', 3000)
+    else
+        TriggerClientEvent('QBCore:Notify', _source, 'Vehicle state set to lowered', 'success', 3000)
+    end
 end)
 
 RegisterServerEvent('ls_wheel_theft:PoliceAlert')
@@ -78,6 +92,20 @@ AddEventHandler('ls_wheel_theft:server:saveJacks', function(netId, jack1, jack2,
     Entity(veh).state.jackStand4 = jack4
 end)
 
+RegisterServerEvent('ls_wheel_theft:server:saveExtensionJacks')
+AddEventHandler('ls_wheel_theft:server:saveExtensionJacks', function(netId, extension1, extension2, extension3, extension4)
+    local veh = NetworkGetEntityFromNetworkId(netId)
+
+    if not DoesEntityExist(veh) then
+        return
+    end
+
+    Entity(veh).state.jackExtension1 = extension1
+    Entity(veh).state.jackExtension2 = extension2
+    Entity(veh).state.jackExtension3 = extension3
+    Entity(veh).state.jackExtension4 = extension4
+end)
+
 function Contains(tab, val)
     for index, value in ipairs(tab) do
         if value == val then
@@ -103,14 +131,9 @@ end)
 RegisterServerEvent('ls_wheel_theft:server:GiveJobBonus')
 AddEventHandler('ls_wheel_theft:server:GiveJobBonus', function()
     local _source = source
-    -- Define the bonus reward amount 
-    local bonusAmount = math.random(300, 500) -- Adjust the bonus range as needed
     
-    -- Add the bonus reward
-    AddMoney(_source, bonusAmount)
-    
-    -- Notify the player
-    TriggerClientEvent('QBCore:Notify', _source, 'You received a bonus of $'..bonusAmount..' for completing the job!', 'success', 5000)
+    -- No payment, just notify the player
+    TriggerClientEvent('QBCore:Notify', _source, 'Mission complete! Payment was already received from the seller.', 'primary', 5000)
 end)
 
 -- Event handler for completing the sale at the seller

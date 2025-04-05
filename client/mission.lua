@@ -81,7 +81,7 @@ function RegisterPedWithOxTarget(ped)
         {
             name = 'ls_wheel_theft:complete_mission',
             icon = 'fas fa-check-circle',
-            label = 'Complete Mission',
+            label = 'Finish Mission (Already Paid)',
             canInteract = function()
                 return LocalPlayer.state.MissionCompleted == true
             end,
@@ -254,19 +254,14 @@ function FinishMissionCompletely()
         end
     end
     
-    -- Reset any remaining states
+    -- Reset payment state for future missions
     LocalPlayer.state.AlreadyPaid = false
     
     -- Finally remove the target vehicle
     DespawnWorkVehicle()
     
-    -- Handle payment logic
-    if not LocalPlayer.state.AlreadyPaid then
-        TriggerServerEvent('ls_wheel_theft:server:GiveJobBonus')
-        LocalPlayer.state.AlreadyPaid = true
-    else
-        QBCore.Functions.Notify('Mission completed! You already received payment earlier.', 'primary', 5000)
-    end
+    -- No payment here - just notify player the mission is complete
+    QBCore.Functions.Notify('Mission completed! You already received payment from the seller.', 'primary', 5000)
 
     -- Clean up any brick props left
     if MISSION_BRICKS and #MISSION_BRICKS > 0 then

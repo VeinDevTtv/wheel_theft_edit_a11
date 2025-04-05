@@ -41,6 +41,12 @@ function CanLowerVehicle(vehicle)
     return false
 end
 
+-- Helper function for vector to string conversion (used in debug)
+function vec2str(vec)
+    if not vec then return "nil" end
+    return string.format("%.2f, %.2f, %.2f", vec.x, vec.y, vec.z)
+end
+
 function RaiseCar()
     -- Verify player job if jobOnly is enabled
     if Config.job.jobOnly and not JobCheck() then
@@ -84,8 +90,16 @@ function RaiseCar()
         return false
     end
     
+    -- Check if vehicle is already raised
+    local netId = NetworkGetNetworkIdFromEntity(vehicle)
+    if Entity(vehicle).state.IsVehicleRaised then
+        QBCore.Functions.Notify('Vehicle is already raised', 'error', 5000)
+        return false
+    end
+    
     QBCore.Functions.Notify(L('raising_car'), 'primary', 5000)
     
+    -- Remove jackstand item from inventory
     TriggerServerEvent('ls_wheel_theft:server:removeItem', Config.jackStandName)
     
     -- Default animation properties if Settings.jackUse is not defined
@@ -123,7 +137,7 @@ function RaiseCar()
     -- Attach jack stands to vehicle
     AttachJackStandsToVehicle(vehicle)
     
-    -- This makes the vehicle float in the air
+    -- Handle the rest of the process after animation
     Citizen.CreateThread(function()
         -- Wait for animation to complete
         Citizen.Wait(animTime)
@@ -136,15 +150,27 @@ function RaiseCar()
         -- Wait a moment for entity states to update (important!)
         Citizen.Wait(500)
         
-        -- Important: Set the IsVehicleRaised state before registering with ox_target
-        local netId = NetworkGetNetworkIdFromEntity(vehicle)
-        TriggerServerEvent('ls_wheel_theft:server:setIsRaised', netId, GetVehicleNumberPlateText(vehicle), true)
+        -- Set the IsVehicleRaised state and store plate for saving
+        local plate = GetVehicleNumberPlateText(vehicle)
+        TriggerServerEvent('ls_wheel_theft:server:setIsRaised', netId, plate, true)
         
         -- Wait for state to sync
         Citizen.Wait(500)
         
-        -- Setup target options for the raised vehicle
-        RegisterTargetVehicleWithOxTarget(vehicle)
+        -- Double-check that state was set
+        if not Entity(vehicle).state.IsVehicleRaised then
+            -- Force set it again if needed
+            TriggerServerEvent('ls_wheel_theft:server:setIsRaised', netId, plate, true)
+            Citizen.Wait(200)
+        end
+        
+        -- Verify the state was set properly before registering with target
+        if Entity(vehicle).state.IsVehicleRaised then
+            -- Setup target options for the raised vehicle
+            RegisterTargetVehicleWithOxTarget(vehicle)
+        else
+            QBCore.Functions.Notify('Failed to set vehicle state. Try again.', 'error', 5000)
+        end
     end)
     
     return true
@@ -345,7 +371,7 @@ function LowerVehicle(errorCoords, bypass)
 
         if DoesVehicleHaveAllWheels(veh) and not bypass then
             QBCore.Functions.Notify('Finish the job', 'inform', 5000)
-            return
+            return false
         end
 
         if Entity(veh).state.IsVehicleRaised then
@@ -385,7 +411,7 @@ function LowerVehicle(errorCoords, bypass)
             
             -- Play animation if loaded
             if HasAnimDictLoaded(dict) then
-                TaskPlayAnim(playerPed, dict, anim, 8.0, -8.0, -1, 1, 0, false, false, false)
+                TaskPlayAnim(playerPed, dict, anim, 8.0, -8.0, 5000, 1, 0, false, false, false)
                 FreezeEntityPosition(playerPed, true)
             end
             
@@ -403,36 +429,126 @@ function LowerVehicle(errorCoords, bypass)
 
             local vehpos = GetEntityCoords(veh)
 
+            -- Get both jackstand bases and extensions
+            local jackstands = {}
+            for i = 1, 4 do
+                if Entity(veh).state['jackStand' .. i] then
+                    local jackNetId = Entity(veh).state['jackStand' .. i]
+                    local jackEntity = NetworkGetEntityFromNetworkId(jackNetId)
+                    if DoesEntityExist(jackEntity) then
+                        table.insert(jackstands, {
+                            entity = jackEntity,
+                            netId = jackNetId,
+                            type = "base"
+                        })
+                    end
+                end
+            end
+
+            local jackExtensions = {}
+            for i = 1, 4 do
+                if Entity(veh).state['jackExtension' .. i] then
+                    local extensionNetId = Entity(veh).state['jackExtension' .. i]
+                    local extensionEntity = NetworkGetEntityFromNetworkId(extensionNetId)
+                    if DoesEntityExist(extensionEntity) then
+                        table.insert(jackExtensions, {
+                            entity = extensionEntity,
+                            netId = extensionNetId,
+                            type = "extension"
+                        })
+                    end
+                end
+            end
+
             -- Play hydraulic lowering sound
             PlaySoundFrontend(-1, "VEHICLES_TRANSIT_HYDRAULIC_DOWN", "VEHICLES_TRANSIT_SOUND", 0)
             
-            local removeZ = 0
-            while removeZ < 0.18 do
-                removeZ = removeZ + 0.001
-                SetEntityCoordsNoOffset(veh, vehpos.x, vehpos.y, vehpos.z - removeZ, true, true, true)
+            -- Create retraction animation for jackstands
+            local targetHeight = 0.18
+            local currentHeight = targetHeight
+            local increment = 0.001
+            
+            while currentHeight > 0 do
+                -- Lower the vehicle gradually
+                currentHeight = currentHeight - increment
+                SetEntityCoordsNoOffset(veh, vehpos.x, vehpos.y, vehpos.z - (targetHeight - currentHeight), true, true, true)
+                
+                -- Calculate extension offset for the retracting parts
+                local extensionOffset = -0.5 - currentHeight
+                
+                -- Update extension positions to simulate retracting
+                for i, extension in ipairs(jackExtensions) do
+                    local extensionEntity = extension.entity
+                    local xOffset, yOffset = 0, 0
+                    local rot = 0
+                    
+                    if i == 1 then -- Front left
+                        xOffset = -((max.x - min.x) / 2) + ((max.x - min.x) / 3.3)
+                        yOffset = ((max.y - min.y) / 2) - ((max.y - min.y) / 3.3)
+                        rot = GetEntityHeading(veh) - 90.0
+                    elseif i == 2 then -- Front right
+                        xOffset = ((max.x - min.x) / 2) - ((max.x - min.x) / 3.3)
+                        yOffset = ((max.y - min.y) / 2) - ((max.y - min.y) / 3.3)
+                        rot = GetEntityHeading(veh) - 90.0
+                    elseif i == 3 then -- Rear left
+                        xOffset = -((max.x - min.x) / 2) + ((max.x - min.x) / 3.3)
+                        yOffset = -((max.y - min.y) / 2) + ((max.y - min.y) / 3.3)
+                        rot = GetEntityHeading(veh) + 90.0
+                    elseif i == 4 then -- Rear right
+                        xOffset = ((max.x - min.x) / 2) - ((max.x - min.x) / 3.3)
+                        yOffset = -((max.y - min.y) / 2) + ((max.y - min.y) / 3.3)
+                        rot = GetEntityHeading(veh) + 90.0
+                    end
+                    
+                    -- Update extension position with vehicle movement
+                    AttachEntityToEntity(extensionEntity, veh, 0, xOffset, yOffset, extensionOffset, 0.0, 0.0, rot, false, false, false, false, 0, true)
+                end
+                
+                -- Add hydraulic sound effects at intervals
+                if math.abs(currentHeight - 0.05) < 0.003 or math.abs(currentHeight - 0.1) < 0.003 or math.abs(currentHeight - 0.15) < 0.003 then
+                    PlaySoundFrontend(-1, "JACK_VEHICLE", "HUD_MINI_GAME_SOUNDSET", 0)
+                end
+                
                 Citizen.Wait(waitTime)
             end
 
+            -- Set final position
+            SetEntityCoordsNoOffset(veh, vehpos.x, vehpos.y, vehpos.z - targetHeight, true, true, true)
+            
+            -- Play final sound effect
+            PlaySoundFrontend(-1, "CONFIRM_BEEP", "HUD_MINI_GAME_SOUNDSET", 0)
+            
+            -- Freeze vehicle temporarily
             FreezeEntityPosition(veh, true)
 
-            -- Remove jackstands with sound effects
-            for i = 4, 1, -1 do
-                if Entity(veh).state['jackStand' .. i] then
-                    PlaySoundFrontend(-1, "REMOVE_TOOL", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
-                    Citizen.Wait(300)
-                    TriggerServerEvent('ls_wheel_theft:server:forceDeleteJackStand', (Entity(veh).state['jackStand' .. i]))
-                end
+            -- First, remove the extension parts
+            for i, extension in ipairs(jackExtensions) do
+                PlaySoundFrontend(-1, "REMOVE_TOOL", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+                Citizen.Wait(200)
+                TriggerServerEvent('ls_wheel_theft:server:forceDeleteJackStand', extension.netId)
+            end
+
+            -- Then remove the jackstand bases with sound effects
+            for i, jackInfo in ipairs(jackstands) do
+                PlaySoundFrontend(-1, "REMOVE_TOOL", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+                Citizen.Wait(300)
+                TriggerServerEvent('ls_wheel_theft:server:forceDeleteJackStand', jackInfo.netId)
             end
 
             Citizen.Wait(500)
             
-            -- Clear animation
+            -- Clear animation and unfreeze player
             ClearPedTasks(playerPed)
             FreezeEntityPosition(playerPed, false)
             
+            -- Unfreeze vehicle
             FreezeEntityPosition(veh, false)
 
+            -- Update vehicle state
             TriggerServerEvent('ls_wheel_theft:server:setIsRaised', netId, false)
+            
+            -- Notify player
+            QBCore.Functions.Notify('Vehicle lowered and jackstands retrieved.', 'success', 3000)
         else
             TriggerServerEvent('ls_wheel_theft:server:setIsRaised', netId, false)
             FreezeEntityPosition(veh, false)
@@ -440,6 +556,8 @@ function LowerVehicle(errorCoords, bypass)
 
         return true
     end
+    
+    return false
 end
 
 -- Function to attach jack stands to vehicle at wheel positions
@@ -452,6 +570,10 @@ function AttachJackStandsToVehicle(vehicle)
     local width = ((max.x - min.x) / 2) - ((max.x - min.x) / 3.3)
     local length = ((max.y - min.y) / 2) - ((max.y - min.y) / 3.3)
     local zOffset = 0.5
+    
+    -- Get vehicle heading and convert to radians for precise positioning
+    local vehHeading = GetEntityHeading(vehicle)
+    local headingRad = math.rad(vehHeading)
     
     -- Request jackstand model
     local model = 'imp_prop_axel_stand_01a'
@@ -475,26 +597,88 @@ function AttachJackStandsToVehicle(vehicle)
     -- Play sound when jackstand placement is started
     PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
     
-    -- First jackstand (front left)
-    local flWheelStand = CreateObject(GetHashKey(model), vehpos.x - width, vehpos.y + length, vehpos.z - zOffset, true, true, true)
-    Citizen.Wait(300)
+    -- Calculate jackstand positions using heading for proper positioning
+    -- Use trig functions to place jackstands relative to vehicle orientation
+    local frontLeftOffset = vector3(-width, length, 0)
+    local frontRightOffset = vector3(width, length, 0)
+    local rearLeftOffset = vector3(-width, -length, 0)
+    local rearRightOffset = vector3(width, -length, 0)
     
-    -- Second jackstand (front right)
-    local frWheelStand = CreateObject(GetHashKey(model), vehpos.x + width, vehpos.y + length, vehpos.z - zOffset, true, true, true)
-    Citizen.Wait(300)
+    -- Rotate the offsets based on vehicle heading
+    local function rotateVector(vec, heading)
+        local headingRad = math.rad(heading)
+        local cosHeading = math.cos(headingRad)
+        local sinHeading = math.sin(headingRad)
+        return vector3(
+            vec.x * cosHeading - vec.y * sinHeading,
+            vec.x * sinHeading + vec.y * cosHeading,
+            vec.z
+        )
+    end
     
-    -- Third jackstand (rear left)
-    local rlWheelStand = CreateObject(GetHashKey(model), vehpos.x - width, vehpos.y - length, vehpos.z - zOffset, true, true, true)
-    Citizen.Wait(300)
+    -- Rotate the offsets based on vehicle heading
+    local flOffset = rotateVector(frontLeftOffset, vehHeading)
+    local frOffset = rotateVector(frontRightOffset, vehHeading)
+    local rlOffset = rotateVector(rearLeftOffset, vehHeading)
+    local rrOffset = rotateVector(rearRightOffset, vehHeading)
     
-    -- Fourth jackstand (rear right)
-    local rrWheelStand = CreateObject(GetHashKey(model), vehpos.x + width, vehpos.y - length, vehpos.z - zOffset, true, true, true)
+    -- Calculate world positions for jackstands
+    local flPosition = vector3(vehpos.x + flOffset.x, vehpos.y + flOffset.y, vehpos.z)
+    local frPosition = vector3(vehpos.x + frOffset.x, vehpos.y + frOffset.y, vehpos.z)
+    local rlPosition = vector3(vehpos.x + rlOffset.x, vehpos.y + rlOffset.y, vehpos.z)
+    local rrPosition = vector3(vehpos.x + rrOffset.x, vehpos.y + rrOffset.y, vehpos.z)
     
-    -- Set up animations for the jackstands to look proper under the car
-    AttachEntityToEntity(flWheelStand, vehicle, 0, -width, length, -zOffset, 0.0, 0.0, -90.0, false, false, false, false, 0, true)
-    AttachEntityToEntity(frWheelStand, vehicle, 0, width, length, -zOffset, 0.0, 0.0, -90.0, false, false, false, false, 0, true)
-    AttachEntityToEntity(rlWheelStand, vehicle, 0, -width, -length, -zOffset, 0.0, 0.0, 90.0, false, false, false, false, 0, true)
-    AttachEntityToEntity(rrWheelStand, vehicle, 0, width, -length, -zOffset, 0.0, 0.0, 90.0, false, false, false, false, 0, true)
+    -- Get precise ground positions for each jackstand
+    local _, flGroundZ = GetGroundZFor_3dCoord(flPosition.x, flPosition.y, flPosition.z, true)
+    local _, frGroundZ = GetGroundZFor_3dCoord(frPosition.x, frPosition.y, frPosition.z, true)
+    local _, rlGroundZ = GetGroundZFor_3dCoord(rlPosition.x, rlPosition.y, rlPosition.z, true)
+    local _, rrGroundZ = GetGroundZFor_3dCoord(rrPosition.x, rrPosition.y, rrPosition.z, true)
+    
+    -- Create jackstands at ground level
+    local flWheelStand = CreateObject(GetHashKey(model), flPosition.x, flPosition.y, flGroundZ, true, true, true)
+    PlaceObjectOnGroundProperly(flWheelStand)
+    Citizen.Wait(100)
+    PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+    
+    local frWheelStand = CreateObject(GetHashKey(model), frPosition.x, frPosition.y, frGroundZ, true, true, true)
+    PlaceObjectOnGroundProperly(frWheelStand)
+    Citizen.Wait(100)
+    PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+    
+    local rlWheelStand = CreateObject(GetHashKey(model), rlPosition.x, rlPosition.y, rlGroundZ, true, true, true)
+    PlaceObjectOnGroundProperly(rlWheelStand)
+    Citizen.Wait(100)
+    PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+    
+    local rrWheelStand = CreateObject(GetHashKey(model), rrPosition.x, rrPosition.y, rrGroundZ, true, true, true)
+    PlaceObjectOnGroundProperly(rrWheelStand)
+    PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+    
+    -- Calculate rotation angles for jackstands
+    -- Front jackstands should face inward toward the vehicle
+    -- Rear jackstands should face outward from the vehicle
+    local flRot = vector3(0.0, 0.0, vehHeading - 90.0)
+    local frRot = vector3(0.0, 0.0, vehHeading - 90.0)
+    local rlRot = vector3(0.0, 0.0, vehHeading + 90.0)
+    local rrRot = vector3(0.0, 0.0, vehHeading + 90.0)
+    
+    -- Apply rotations to jackstands
+    SetEntityRotation(flWheelStand, flRot.x, flRot.y, flRot.z, 2, true)
+    SetEntityRotation(frWheelStand, frRot.x, frRot.y, frRot.z, 2, true)
+    SetEntityRotation(rlWheelStand, rlRot.x, rlRot.y, rlRot.z, 2, true)
+    SetEntityRotation(rrWheelStand, rrRot.x, rrRot.y, rrRot.z, 2, true)
+    
+    -- Get precise positions after placement
+    local flStandPos = GetEntityCoords(flWheelStand)
+    local frStandPos = GetEntityCoords(frWheelStand)
+    local rlStandPos = GetEntityCoords(rlWheelStand)
+    local rrStandPos = GetEntityCoords(rrWheelStand)
+    
+    -- Set collision properties
+    SetEntityCollision(flWheelStand, false, true)
+    SetEntityCollision(frWheelStand, false, true)
+    SetEntityCollision(rlWheelStand, false, true)
+    SetEntityCollision(rrWheelStand, false, true)
     
     -- Save jacks to entity state for later removal
     local netId = NetworkGetNetworkIdFromEntity(vehicle)
@@ -506,20 +690,146 @@ function AttachJackStandsToVehicle(vehicle)
         true
     )
     
-    -- Lift the vehicle gradually with sound effects
-    PlaySoundFrontend(-1, "VEHICLES_TRANSIT_HYDRAULIC_UP", "VEHICLES_TRANSIT_SOUND", 0)
-    
-    -- Create thread for smooth lifting
+    -- Create thread for lifting the vehicle with jackstands and modifying suspension
     Citizen.CreateThread(function()
-        local height = 0.18
-        local addZ = 0
-        local waitTime = 5
+        -- Request jackstand extension model
+        local extensionModel = 'prop_tool_jack'
+        RequestModel(extensionModel)
         
-        while addZ < height do
-            addZ = addZ + 0.001
-            SetEntityCoordsNoOffset(vehicle, vehpos.x, vehpos.y, vehpos.z + addZ, true, true, true)
-            Citizen.Wait(waitTime)
+        local modelTimeout = 5000
+        while not HasModelLoaded(extensionModel) and modelTimeout > 0 do
+            Citizen.Wait(100)
+            modelTimeout = modelTimeout - 100
         end
+        
+        if not HasModelLoaded(extensionModel) then
+            QBCore.Functions.Notify('Failed to load jackstand extension model', 'error', 3000)
+            return
+        end
+        
+        -- Create extension objects for each jackstand
+        local flExtension = CreateObject(GetHashKey(extensionModel), flStandPos.x, flStandPos.y, flStandPos.z, true, true, true)
+        local frExtension = CreateObject(GetHashKey(extensionModel), frStandPos.x, frStandPos.y, frStandPos.z, true, true, true)
+        local rlExtension = CreateObject(GetHashKey(extensionModel), rlStandPos.x, rlStandPos.y, rlStandPos.z, true, true, true)
+        local rrExtension = CreateObject(GetHashKey(extensionModel), rrStandPos.x, rrStandPos.y, rrStandPos.z, true, true, true)
+        
+        -- Hide extensions initially
+        SetEntityVisible(flExtension, false, false)
+        SetEntityVisible(frExtension, false, false)
+        SetEntityVisible(rlExtension, false, false)
+        SetEntityVisible(rrExtension, false, false)
+        
+        -- Save extensions to entity state
+        TriggerServerEvent('ls_wheel_theft:server:saveExtensionJacks', netId, 
+            NetworkGetNetworkIdFromEntity(flExtension), 
+            NetworkGetNetworkIdFromEntity(frExtension), 
+            NetworkGetNetworkIdFromEntity(rlExtension), 
+            NetworkGetNetworkIdFromEntity(rrExtension)
+        )
+        
+        -- Store initial position for reference
+        local initialPos = GetEntityCoords(vehicle)
+        
+        -- Target height for the lift
+        local targetHeight = 0.3  -- Increased from 0.18 for more visible lift
+        
+        -- Play hydraulic sound
+        PlaySoundFrontend(-1, "VEHICLES_TRANSIT_HYDRAULIC_UP", "VEHICLES_TRANSIT_SOUND", 0)
+        
+        -- Request network control of vehicle
+        NetworkRequestControlOfEntity(vehicle)
+        
+        local timeout = 2000
+        while not NetworkHasControlOfEntity(vehicle) and timeout > 0 do
+            Citizen.Wait(100)
+            timeout = timeout - 100
+        end
+        
+        -- Debug initial position
+        if Config.debug then
+            QBCore.Functions.Notify('Initial pos: ' .. vec2str(initialPos), 'primary', 3000)
+        end
+        
+        -- Make sure vehicle is in good condition first
+        SetVehicleFixed(vehicle)
+        
+        -- DIRECT APPROACH: Lift the vehicle immediately using several methods
+        
+        -- METHOD 1: Set entity coordinates (most reliable)
+        -- First unfreeze the vehicle to allow movement
+        FreezeEntityPosition(vehicle, false)
+        Citizen.Wait(50)
+        
+        -- Set the vehicle to a higher position
+        SetEntityCoordsNoOffset(vehicle, 
+            initialPos.x, 
+            initialPos.y, 
+            initialPos.z + targetHeight, 
+            true, true, true)
+        
+        -- METHOD 2: Modify vehicle suspension
+        -- This helps visually with wheel positions
+        SetVehicleSuspensionHeight(vehicle, -0.1)  -- Negative values raise the vehicle
+        
+        -- METHOD 3: Apply upward force to help with physics
+        ApplyForceToEntity(vehicle, 0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0, true, true, true, false, true)
+        
+        -- Short wait for physics to settle
+        Citizen.Wait(300)
+        
+        -- METHOD 4: Try adjusting each wheel's offset
+        for i = 0, 7 do -- Up to 8 wheels for trucks
+            if not IsVehicleTyreBurst(vehicle, i, true) then
+                -- Adjust wheel positions
+                local currentOffset = GetVehicleWheelYOffset(vehicle, i)
+                SetVehicleWheelYOffset(vehicle, i, currentOffset - 0.05)
+            end
+        end
+        
+        -- Freeze the vehicle in place
+        Citizen.Wait(200)
+        FreezeEntityPosition(vehicle, true)
+        
+        -- Check final position
+        local finalPos = GetEntityCoords(vehicle)
+        local actualLift = finalPos.z - initialPos.z
+        
+        -- Debug final position
+        if Config.debug then
+            QBCore.Functions.Notify('Final pos: ' .. vec2str(finalPos), 'primary', 3000)
+            QBCore.Functions.Notify('Actual lift: ' .. tostring(actualLift), 'primary', 3000)
+        end
+        
+        -- Failsafe if vehicle didn't raise enough
+        if actualLift < (targetHeight * 0.5) then
+            QBCore.Functions.Notify('Using backup lifting method...', 'primary', 2000)
+            
+            -- Try again with higher force
+            FreezeEntityPosition(vehicle, false)
+            SetEntityCoordsNoOffset(vehicle, initialPos.x, initialPos.y, initialPos.z + targetHeight, true, true, true)
+            ApplyForceToEntity(vehicle, 0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0, true, true, true, false, true)
+            Citizen.Wait(300)
+            FreezeEntityPosition(vehicle, true)
+            
+            -- Check again
+            finalPos = GetEntityCoords(vehicle)
+            actualLift = finalPos.z - initialPos.z
+            
+            if Config.debug then
+                QBCore.Functions.Notify('Backup lift: ' .. tostring(actualLift), 'primary', 3000)
+            end
+        end
+        
+        -- Sound effects for completion
+        PlaySoundFrontend(-1, "JACK_VEHICLE", "HUD_MINI_GAME_SOUNDSET", 0)
+        Citizen.Wait(200)
+        PlaySoundFrontend(-1, "CONFIRM_BEEP", "HUD_MINI_GAME_SOUNDSET", 0)
+        
+        -- Set a global flag to help identify this vehicle
+        DecorSetBool(vehicle, "WHEEL_THEFT_LIFTED", true)
+        
+        -- Show final notification
+        QBCore.Functions.Notify('Vehicle raised with jackstands', 'success', 3000)
     end)
     
     return true
