@@ -54,13 +54,16 @@ function RetrieveMoney(sellingKey, sellingPed)
     TriggerServerEvent('ls_wheel_theft:Sell', sellingKey)
 end
 
-function PlayAnim(dict, anim)
+function PlayAnim(dict, anim, flags)
     Citizen.CreateThread(function()
         RequestAnimDict(dict)
         while not HasAnimDictLoaded(dict) do
             Citizen.Wait(100)
         end
-        TaskPlayAnim(PlayerPedId(), dict, anim, 2.0, 1000.0, 2.0, 2, 0, true, true, false)
+        local playerPed = PlayerPedId()
+        -- Use provided flags or default to 2 (loop animation)
+        local animFlags = flags or 2
+        TaskPlayAnim(playerPed, dict, anim, 2.0, 1000.0, 2.0, animFlags, 0, true, true, false)
         RemoveAnimDict(dict)
     end)
 end
@@ -437,4 +440,19 @@ function DoesVehicleHaveAllWheels(vehicle)
     end
 
     return true
+end
+
+-- Function to get vehicle in the direction player is looking
+function GetVehicleInDirection()
+    local playerPed = PlayerPedId()
+    local playerCoords = GetEntityCoords(playerPed)
+    local inDirection = GetOffsetFromEntityInWorldCoords(playerPed, 0.0, 5.0, 0.0)
+    local rayHandle = StartExpensiveSynchronousShapeTestLosProbe(playerCoords.x, playerCoords.y, playerCoords.z, inDirection.x, inDirection.y, inDirection.z, 10, playerPed, 0)
+    local _, _, _, _, vehicle = GetShapeTestResult(rayHandle)
+    
+    if vehicle and DoesEntityExist(vehicle) and IsEntityAVehicle(vehicle) then
+        return vehicle
+    end
+    
+    return nil
 end

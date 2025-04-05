@@ -328,5 +328,12 @@ Settings.wheelTakeOff = {
     }
 }
 
+Settings.jackUse = {
+    animDict = "anim@amb@clubhouse@tutorial@bkr_tut_ig3@",
+    anim = "machinic_loop_mechandplayer",
+    flags = 1,
+    time = 5000 -- 5 seconds for animation
+}
+
 -- Support for ox_lib context menu (disable if it causes errors)
 Config.useOxLib = false

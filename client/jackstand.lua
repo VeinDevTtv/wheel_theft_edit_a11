@@ -87,22 +87,64 @@ function RaiseCar()
     QBCore.Functions.Notify(L('raising_car'), 'primary', 5000)
     
     TriggerServerEvent('ls_wheel_theft:server:removeItem', Config.jackStandName)
-    PlayAnim(Settings.jackUse.animDict, Settings.jackUse.anim, Settings.jackUse.flags)
+    
+    -- Default animation properties if Settings.jackUse is not defined
+    local animDict = "anim@amb@clubhouse@tutorial@bkr_tut_ig3@"
+    local anim = "machinic_loop_mechandplayer"
+    local flags = 1  -- Important: Use flag 1 (non-looping)
+    local animTime = 5000 -- 5 seconds for animation
+    
+    -- Use Settings.jackUse if available
+    if Settings.jackUse then
+        animDict = Settings.jackUse.animDict or animDict
+        anim = Settings.jackUse.anim or anim
+        flags = 1  -- Override to always use flag 1 to prevent animation loop
+        animTime = Settings.jackUse.time or animTime
+    end
+    
+    -- Store the player ped for use in the thread
+    local playerPed = PlayerPedId()
+    
+    -- Play animation in a non-looping way
+    RequestAnimDict(animDict)
+    local timeout = 1000
+    while not HasAnimDictLoaded(animDict) and timeout > 0 do
+        Citizen.Wait(10)
+        timeout = timeout - 10
+    end
+    
+    if HasAnimDictLoaded(animDict) then
+        -- Use a fixed time animation rather than looping one
+        TaskPlayAnim(playerPed, animDict, anim, 8.0, -8.0, animTime, flags, 0, false, false, false)
+    else
+        QBCore.Functions.Notify('Animation failed to load, continuing...', 'primary', 2000)
+    end
+    
+    -- Attach jack stands to vehicle
     AttachJackStandsToVehicle(vehicle)
     
     -- This makes the vehicle float in the air
     Citizen.CreateThread(function()
         -- Wait for animation to complete
-        Citizen.Wait(Settings.jackUse.time)
+        Citizen.Wait(animTime)
+        
+        -- Make sure animation is cleared
+        ClearPedTasks(playerPed)
         
         QBCore.Functions.Notify(L('car_raised'), 'success', 5000)
         
+        -- Wait a moment for entity states to update (important!)
+        Citizen.Wait(500)
+        
+        -- Important: Set the IsVehicleRaised state before registering with ox_target
+        local netId = NetworkGetNetworkIdFromEntity(vehicle)
+        TriggerServerEvent('ls_wheel_theft:server:setIsRaised', netId, GetVehicleNumberPlateText(vehicle), true)
+        
+        -- Wait for state to sync
+        Citizen.Wait(500)
+        
         -- Setup target options for the raised vehicle
         RegisterTargetVehicleWithOxTarget(vehicle)
-        
-        -- Save vehicle state as raised
-        local plate = GetVehicleNumberPlateText(vehicle)
-        TriggerServerEvent('ls_wheel_theft:server:setIsRaised', NetworkGetNetworkIdFromEntity(vehicle), plate, true)
     end)
     
     return true
@@ -398,4 +440,87 @@ function LowerVehicle(errorCoords, bypass)
 
         return true
     end
+end
+
+-- Function to attach jack stands to vehicle at wheel positions
+function AttachJackStandsToVehicle(vehicle)
+    if not vehicle or not DoesEntityExist(vehicle) then return end
+    
+    -- Calculate positions for jackstands using vehicle dimensions
+    local vehpos = GetEntityCoords(vehicle)
+    local min, max = GetModelDimensions(GetEntityModel(vehicle))
+    local width = ((max.x - min.x) / 2) - ((max.x - min.x) / 3.3)
+    local length = ((max.y - min.y) / 2) - ((max.y - min.y) / 3.3)
+    local zOffset = 0.5
+    
+    -- Request jackstand model
+    local model = 'imp_prop_axel_stand_01a'
+    RequestModel(model)
+    
+    -- Wait for model to load
+    local modelTimeout = 10000
+    while not HasModelLoaded(model) and modelTimeout > 0 do
+        Citizen.Wait(100)
+        modelTimeout = modelTimeout - 100
+    end
+    
+    if not HasModelLoaded(model) then
+        QBCore.Functions.Notify('Failed to load jackstand model', 'error', 5000)
+        return false
+    end
+    
+    -- Freeze vehicle to prevent movement during lifting
+    FreezeEntityPosition(vehicle, true)
+    
+    -- Play sound when jackstand placement is started
+    PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+    
+    -- First jackstand (front left)
+    local flWheelStand = CreateObject(GetHashKey(model), vehpos.x - width, vehpos.y + length, vehpos.z - zOffset, true, true, true)
+    Citizen.Wait(300)
+    
+    -- Second jackstand (front right)
+    local frWheelStand = CreateObject(GetHashKey(model), vehpos.x + width, vehpos.y + length, vehpos.z - zOffset, true, true, true)
+    Citizen.Wait(300)
+    
+    -- Third jackstand (rear left)
+    local rlWheelStand = CreateObject(GetHashKey(model), vehpos.x - width, vehpos.y - length, vehpos.z - zOffset, true, true, true)
+    Citizen.Wait(300)
+    
+    -- Fourth jackstand (rear right)
+    local rrWheelStand = CreateObject(GetHashKey(model), vehpos.x + width, vehpos.y - length, vehpos.z - zOffset, true, true, true)
+    
+    -- Set up animations for the jackstands to look proper under the car
+    AttachEntityToEntity(flWheelStand, vehicle, 0, -width, length, -zOffset, 0.0, 0.0, -90.0, false, false, false, false, 0, true)
+    AttachEntityToEntity(frWheelStand, vehicle, 0, width, length, -zOffset, 0.0, 0.0, -90.0, false, false, false, false, 0, true)
+    AttachEntityToEntity(rlWheelStand, vehicle, 0, -width, -length, -zOffset, 0.0, 0.0, 90.0, false, false, false, false, 0, true)
+    AttachEntityToEntity(rrWheelStand, vehicle, 0, width, -length, -zOffset, 0.0, 0.0, 90.0, false, false, false, false, 0, true)
+    
+    -- Save jacks to entity state for later removal
+    local netId = NetworkGetNetworkIdFromEntity(vehicle)
+    TriggerServerEvent('ls_wheel_theft:server:saveJacks', netId, 
+        NetworkGetNetworkIdFromEntity(flWheelStand), 
+        NetworkGetNetworkIdFromEntity(frWheelStand), 
+        NetworkGetNetworkIdFromEntity(rlWheelStand), 
+        NetworkGetNetworkIdFromEntity(rrWheelStand), 
+        true
+    )
+    
+    -- Lift the vehicle gradually with sound effects
+    PlaySoundFrontend(-1, "VEHICLES_TRANSIT_HYDRAULIC_UP", "VEHICLES_TRANSIT_SOUND", 0)
+    
+    -- Create thread for smooth lifting
+    Citizen.CreateThread(function()
+        local height = 0.18
+        local addZ = 0
+        local waitTime = 5
+        
+        while addZ < height do
+            addZ = addZ + 0.001
+            SetEntityCoordsNoOffset(vehicle, vehpos.x, vehpos.y, vehpos.z + addZ, true, true, true)
+            Citizen.Wait(waitTime)
+        end
+    end)
+    
+    return true
 end
