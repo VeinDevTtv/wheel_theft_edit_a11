@@ -262,7 +262,19 @@ end
 
 function CompleteSale(sellerPed)
     saleActive = false
-    RetrieveMoney('sale_ped', sellerPed)
+    
+    -- Perform sell animation but don't trigger the separate payment event
+    local playerPed = PlayerPedId()
+    TaskTurnPedToFaceEntity(playerPed, sellerPed, 1000)
+    Citizen.Wait(1000)
+    
+    PlayAnim('mp_common', 'givetake2_b', 0, sellerPed)
+    PlayAnim('mp_common', 'givetake1_a')
+    
+    Citizen.Wait(1000)
+    
+    ClearPedTasks(playerPed)
+    TaskStartScenarioInPlace(sellerPed, "WORLD_HUMAN_GUARD_STAND", 0, true)
 
     -- Delete the seller ped
     if DoesEntityExist(sellerPed) then
@@ -304,22 +316,12 @@ function CompleteSale(sellerPed)
     sellerPedNetId = nil
     cratePropNetId = nil
     
-    -- Set the paid state to prevent double payment
+    -- Set payment and mission states
     LocalPlayer.state.AlreadyPaid = true
-    
-    -- Make server-side payment
-    TriggerServerEvent('ls_wheel_theft:server:CompleteSale', #storedWheels)
-    
-    -- Mark mission as completed but pending final turn-in
-    -- This will trigger the "Finish Mission" option at the mission giver
     LocalPlayer.state.MissionCompleted = true
     
-    -- Ensure mission completion status is set properly and synchronized
-    SetTimeout(500, function()
-        -- Force refresh state after a short delay
-        LocalPlayer.state.MissionCompleted = true
-        QBCore.Functions.Notify('Mission state set to completed', 'success', 1000)
-    end)
+    -- Make server-side payment (only one payment method)
+    TriggerServerEvent('ls_wheel_theft:server:CompleteSale', #storedWheels)
     
     QBCore.Functions.Notify('Sale completed! Return to the mission giver to finish the job.', 'success', 8000)
     
@@ -332,14 +334,11 @@ function CompleteSale(sellerPed)
         SetBlipRoute(missionBlip, true)
     end
     
-    -- Store the blip ID in the state to ensure it's accessible
+    -- Store the blip ID for later cleanup
     LocalPlayer.state.ReturnBlip = missionBlip
     
-    -- Trigger a server event to refresh targeting options on the mission ped
+    -- Trigger the refresh event to update mission ped targeting
     TriggerServerEvent('ls_wheel_theft:server:refreshMissionPed')
-    
-    -- Keep the target vehicle - don't cancel the mission yet
-    -- CancelMission() will be called when the player returns to the mission giver
 end
 
 function SetCooldown(time)

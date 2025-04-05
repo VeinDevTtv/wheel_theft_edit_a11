@@ -303,6 +303,16 @@ function SpawnBricksUnderVehicle(vehicle)
     local headingRadians = math.rad(heading)
     local suspensionBones = {'suspension_lf','suspension_rf', 'suspension_lr', 'suspension_rr'}
     local bricks = {}
+    
+    -- Clear any existing bricks
+    if MISSION_BRICKS and #MISSION_BRICKS > 0 then
+        for _, existingBrick in pairs(MISSION_BRICKS) do
+            if DoesEntityExist(existingBrick) then
+                DeleteEntity(existingBrick)
+            end
+        end
+        MISSION_BRICKS = {}
+    end
 
     FreezeEntityPosition(vehicle, true)
     SetEntityInvincible(vehicle, true)
@@ -329,9 +339,12 @@ function SpawnBricksUnderVehicle(vehicle)
                 end
 
                 table.insert(bricks, brick)
+                table.insert(MISSION_BRICKS, brick)
                 SetEntityHeading(brick, GetEntityHeading(vehicle))
                 FreezeEntityPosition(brick, true)
                 SetEntityInvincible(brick, true)
+                -- Make sure bricks are set as mission entities so they don't disappear
+                SetEntityAsMissionEntity(brick, true, true)
             end
         else
             local leftOffsetX = -0.35 * math.cos(headingRadians)
@@ -351,17 +364,24 @@ function SpawnBricksUnderVehicle(vehicle)
                 end
 
                 table.insert(bricks, brick)
+                table.insert(MISSION_BRICKS, brick)
                 SetEntityHeading(brick, GetEntityHeading(vehicle))
                 FreezeEntityPosition(brick, true)
                 SetEntityInvincible(brick, true)
+                -- Make sure bricks are set as mission entities so they don't disappear
+                SetEntityAsMissionEntity(brick, true, true)
             end
         end
     end
     
-    for k=1, #bricks, 1 do
-        SetEntityAsNoLongerNeeded(bricks[k])
-    end
-
+    -- Don't mark entities as no longer needed - this allows the game to clean them up automatically
+    -- We want to keep them until we explicitly delete them
+    -- for k=1, #bricks, 1 do
+    --     SetEntityAsNoLongerNeeded(bricks[k])
+    -- end
+    
+    QBCore.Functions.Notify('Created ' .. #MISSION_BRICKS .. ' brick props', 'primary', 3000)
+    return bricks
 end
 
 function JobCheck()

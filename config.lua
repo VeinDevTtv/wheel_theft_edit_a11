@@ -326,3 +326,6 @@ Settings.wheelTakeOff = {
         }
     }
 }
+
+-- Add support for ox_lib context menu
+Config.useOxLib = true -- Set to true if ox_lib is available on your server

@@ -135,8 +135,6 @@ end)
 -- Event handler to refresh mission ped targeting options
 RegisterServerEvent('ls_wheel_theft:server:refreshMissionPed')
 AddEventHandler('ls_wheel_theft:server:refreshMissionPed', function()
-    local _source = source
-    
-    -- Broadcast to all clients to refresh mission ped (including the source client)
-    TriggerClientEvent('ls_wheel_theft:client:refreshMissionPed', -1, _source)
+    -- Broadcast to all clients to refresh mission ped
+    TriggerClientEvent('ls_wheel_theft:client:refreshMissionPed', -1)
 end)

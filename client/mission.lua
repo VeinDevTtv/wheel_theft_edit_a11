@@ -4,11 +4,9 @@ local missionPedObject = nil
 
 function CreateMissionPed()
     local missionTable = Config.missionPeds['mission_ped']
-    QBCore.Functions.Notify('Creating mission ped at: ' .. missionTable.location.x .. ', ' .. missionTable.location.y .. ', ' .. missionTable.location.z, 'primary', 5000)
     
     local ped = SpawnPed(missionTable)
     local blip = missionTable.blip
-    local blipCoords = missionTable.location
 
     if blip.showBlip then
         CreateSellerBlip(GetEntityCoords(ped), blip.blipIcon, blip.blipColor, 1.0, 1.0, blip.blipLabel)
@@ -16,14 +14,7 @@ function CreateMissionPed()
     
     -- Store the ped netId for use with ox_target
     if DoesEntityExist(ped) then
-        QBCore.Functions.Notify('Mission ped created successfully', 'success', 5000)
         missionPedNetId = NetworkGetNetworkIdFromEntity(ped)
-        
-        if missionPedNetId == 0 then
-            QBCore.Functions.Notify('ERROR: Failed to get network ID for mission ped', 'error', 5000)
-        else
-            QBCore.Functions.Notify('Mission ped network ID: ' .. missionPedNetId, 'primary', 5000)
-        end
     else
         QBCore.Functions.Notify('ERROR: Failed to create mission ped', 'error', 5000)
         return
@@ -41,21 +32,13 @@ end
 
 -- Function bach n'registeri ped f ox_target
 function RegisterPedWithOxTarget(ped)
-    -- Debug notification
-    QBCore.Functions.Notify('Registering mission NPC with ox_target', 'primary', 1000)
-    
     -- Store the actual ped for removal later
     missionPedObject = ped
     
-    -- Force checking LocalPlayer.state
-    local missionCompleted = LocalPlayer.state.MissionCompleted
-    if missionCompleted == nil then
+    -- Initialize mission state if needed
+    if LocalPlayer.state.MissionCompleted == nil then
         LocalPlayer.state.MissionCompleted = false
-        missionCompleted = false
     end
-    
-    -- Debug: Show current mission state
-    QBCore.Functions.Notify('Current mission state: ' .. tostring(missionCompleted), 'primary', 1000)
     
     -- Clear any existing targets for this ped to prevent duplicates
     local pedModel = GetEntityModel(ped)
@@ -65,20 +48,14 @@ function RegisterPedWithOxTarget(ped)
         exports.ox_target:removeEntity(missionPedNetId)
     end
     
-    -- Hna ghadi n'defini options dial ox_target
+    -- Define options for ox_target
     local options = {
         {
             name = 'ls_wheel_theft:start_mission',
             icon = 'fas fa-car-burst',
             label = 'Start Wheel Theft Mission',
             canInteract = function()
-                -- Only show this option if not in a mission and not completed mission
-                local isActive = MISSION_ACTIVATED
-                local isCompleted = LocalPlayer.state.MissionCompleted
-                
-                QBCore.Functions.Notify('Start option check: Active=' .. tostring(isActive) .. ', Completed=' .. tostring(isCompleted), 'primary', 1000)
-                
-                return not isActive and not isCompleted
+                return not MISSION_ACTIVATED and not LocalPlayer.state.MissionCompleted
             end,
             onSelect = function()
                 if not cooldown then
@@ -92,13 +69,7 @@ function RegisterPedWithOxTarget(ped)
             icon = 'fas fa-ban',
             label = 'Cancel Mission',
             canInteract = function()
-                -- Only show this option if already in a mission and not completed
-                local isActive = MISSION_ACTIVATED 
-                local isCompleted = LocalPlayer.state.MissionCompleted
-                
-                QBCore.Functions.Notify('Cancel option check: Active=' .. tostring(isActive) .. ', Completed=' .. tostring(isCompleted), 'primary', 1000)
-                
-                return isActive and not isCompleted
+                return MISSION_ACTIVATED and not LocalPlayer.state.MissionCompleted
             end,
             onSelect = function()
                 if not cooldown then
@@ -112,72 +83,51 @@ function RegisterPedWithOxTarget(ped)
             icon = 'fas fa-check-circle',
             label = 'Finish Wheel Theft Job',
             canInteract = function()
-                -- Only show this option if the mission is completed (wheels sold)
-                local isCompleted = LocalPlayer.state.MissionCompleted
-                
-                -- Force check the state again 
-                if isCompleted == nil then
-                    isCompleted = false
-                end
-                
-                QBCore.Functions.Notify('Finish option check: Completed=' .. tostring(isCompleted), 'primary', 1000)
-                
-                return isCompleted == true
+                return LocalPlayer.state.MissionCompleted == true
             end,
             onSelect = function()
                 if not cooldown then
                     SetCooldown(3000)
-                    -- Complete the job by cancelling the mission and cleaning up
-                    MISSION_ACTIVATED = false
-                    LocalPlayer.state.MissionCompleted = false
-                    QBCore.Functions.Notify('Job completed successfully! The car has been disposed of.', 'success', 5000)
                     
-                    -- Now it's safe to clean up everything
-                    if MISSION_BLIP and DoesBlipExist(MISSION_BLIP) then
-                        RemoveBlip(MISSION_BLIP)
-                        MISSION_BLIP = nil
-                    end
+                    -- Create a menu to let player choose what to do
+                    local elements = {
+                        {
+                            title = "Complete Mission",
+                            description = "Finish the mission and clean up everything",
+                            icon = "fas fa-check-double",
+                            onSelect = function()
+                                FinishMissionCompletely()
+                            end
+                        },
+                        {
+                            title = "Start New Mission With Same Vehicle",
+                            description = "Keep the current vehicle and start a new mission",
+                            icon = "fas fa-redo",
+                            onSelect = function()
+                                StartNewMissionWithExistingVehicle()
+                            end
+                        }
+                    }
                     
-                    if MISSION_AREA and DoesBlipExist(MISSION_AREA) then
-                        RemoveBlip(MISSION_AREA)
-                        MISSION_AREA = nil
-                    end
-                    
-                    -- Remove the return to mission giver blip
-                    if LocalPlayer.state.ReturnBlip and DoesBlipExist(LocalPlayer.state.ReturnBlip) then
-                        RemoveBlip(LocalPlayer.state.ReturnBlip)
-                        LocalPlayer.state.ReturnBlip = nil
-                    end
-                    
-                    -- Remove any other remaining blips
-                    local blips = GetActiveBlips()
-                    for _, blip in ipairs(blips) do
-                        if DoesBlipExist(blip) then
-                            RemoveBlip(blip)
-                        end
-                    end
-                    
-                    -- Finally remove the target vehicle
-                    DespawnWorkVehicle()
-                    
-                    -- No need to give additional bonus as they've already been paid at the seller
-                    -- The state AlreadyPaid is set in selling.lua when the player completes the sale
-                    if not LocalPlayer.state.AlreadyPaid then
-                        -- Add a bonus reward only if they haven't been paid yet
-                        TriggerServerEvent('ls_wheel_theft:server:GiveJobBonus')
-                        LocalPlayer.state.AlreadyPaid = true
+                    -- Display the menu for player choice
+                    -- Check if ox_lib exists for context menu
+                    if Config.useOxLib and exports.ox_lib then
+                        exports.ox_lib:showContext({
+                            id = 'wheel_theft_finish_menu',
+                            title = 'Choose Mission Option',
+                            options = elements
+                        })
                     else
-                        QBCore.Functions.Notify('Mission completed! You already received payment earlier.', 'primary', 5000)
+                        -- Direct selection without menu (option 1)
+                        FinishMissionCompletely()
                     end
                 end
             end
         }
     }
     
-    -- Choose only ONE registration method - model is more reliable
+    -- Use model-based targeting (more reliable)
     exports.ox_target:addModel(pedModel, options)
-    
-    QBCore.Functions.Notify('NPC registered with ox_target - model: ' .. pedModel, 'success', 3000)
 end
 
 -- Helper function to get all active blips
@@ -240,6 +190,16 @@ function CancelMission()
     -- This ensures the truck is only removed when a player explicitly cancels the mission by speaking to the NPC
     -- The function is defined in truckSpawn.lua and handles vehicle cleanup
     DespawnWorkVehicle()
+
+    -- Clean up any brick props left
+    if MISSION_BRICKS and #MISSION_BRICKS > 0 then
+        for _, brick in pairs(MISSION_BRICKS) do
+            if DoesEntityExist(brick) then
+                DeleteEntity(brick)
+            end
+        end
+        MISSION_BRICKS = {}
+    end
 end
 
 function SetCooldown(time)
@@ -335,33 +295,185 @@ end, false)
 
 -- Event handler to refresh mission ped targeting options
 RegisterNetEvent('ls_wheel_theft:client:refreshMissionPed')
-AddEventHandler('ls_wheel_theft:client:refreshMissionPed', function(sourcePlayer)
-    -- This is called on all clients
-    
+AddEventHandler('ls_wheel_theft:client:refreshMissionPed', function()
     -- Only process if we have a mission ped and it's valid
     if missionPedObject and DoesEntityExist(missionPedObject) then
-        -- Get the ped model
-        local pedModel = GetEntityModel(missionPedObject)
-        
-        -- Remove existing target options to prevent duplicates
-        exports.ox_target:removeModel(pedModel)
-        
         -- Re-register the ped with ox_target to refresh options
-        Citizen.Wait(500) -- Short delay to ensure cleanup is complete
+        local pedModel = GetEntityModel(missionPedObject)
+        exports.ox_target:removeModel(pedModel)
+        Citizen.Wait(200)
         RegisterPedWithOxTarget(missionPedObject)
-        
-        QBCore.Functions.Notify('Mission ped targeting refreshed', 'success', 2000)
     end
 end)
 
--- This command allows admin/developers to manually refresh the mission ped targeting
+-- Command for admins to refresh mission ped targeting
 RegisterCommand('refreshMissionPed', function()
     if missionPedObject and DoesEntityExist(missionPedObject) then
-        QBCore.Functions.Notify('Manually refreshing mission ped targeting...', 'primary', 3000)
-        TriggerEvent('ls_wheel_theft:client:refreshMissionPed', PlayerId())
+        TriggerEvent('ls_wheel_theft:client:refreshMissionPed')
     else
-        QBCore.Functions.Notify('No mission ped found to refresh', 'error', 3000)
+        QBCore.Functions.Notify('No mission ped found to refresh', 'error', 5000)
     end
 end, false)
+
+-- Function to completely finish the mission and clean up
+function FinishMissionCompletely()
+    -- Complete the job by cancelling the mission and cleaning up
+    MISSION_ACTIVATED = false
+    LocalPlayer.state.MissionCompleted = false
+    QBCore.Functions.Notify('Job completed successfully! The car has been disposed of.', 'success', 5000)
+    
+    -- Clean up everything
+    if MISSION_BLIP and DoesBlipExist(MISSION_BLIP) then
+        RemoveBlip(MISSION_BLIP)
+        MISSION_BLIP = nil
+    end
+    
+    if MISSION_AREA and DoesBlipExist(MISSION_AREA) then
+        RemoveBlip(MISSION_AREA)
+        MISSION_AREA = nil
+    end
+    
+    -- Remove the return to mission giver blip
+    if LocalPlayer.state.ReturnBlip and DoesBlipExist(LocalPlayer.state.ReturnBlip) then
+        RemoveBlip(LocalPlayer.state.ReturnBlip)
+        LocalPlayer.state.ReturnBlip = nil
+    end
+    
+    -- Remove any other remaining blips
+    local blips = GetActiveBlips()
+    for _, blip in ipairs(blips) do
+        if DoesBlipExist(blip) then
+            RemoveBlip(blip)
+        end
+    end
+    
+    -- Reset any remaining states
+    LocalPlayer.state.AlreadyPaid = false
+    
+    -- Finally remove the target vehicle
+    DespawnWorkVehicle()
+    
+    -- Handle payment logic
+    if not LocalPlayer.state.AlreadyPaid then
+        TriggerServerEvent('ls_wheel_theft:server:GiveJobBonus')
+        LocalPlayer.state.AlreadyPaid = true
+    else
+        QBCore.Functions.Notify('Mission completed! You already received payment earlier.', 'primary', 5000)
+    end
+
+    -- Clean up any brick props left
+    if MISSION_BRICKS and #MISSION_BRICKS > 0 then
+        for _, brick in pairs(MISSION_BRICKS) do
+            if DoesEntityExist(brick) then
+                DeleteEntity(brick)
+            end
+        end
+        MISSION_BRICKS = {}
+    end
+end
+
+-- Function to start a new mission with existing vehicle
+function StartNewMissionWithExistingVehicle()
+    -- Store the current vehicle before it gets reset
+    local currentVehicle = TARGET_VEHICLE
+    
+    -- Verify vehicle still exists
+    if not currentVehicle or not DoesEntityExist(currentVehicle) then
+        QBCore.Functions.Notify('The previous vehicle is no longer available. Starting a regular mission.', 'error', 5000)
+        FinishMissionCompletely()
+        Wait(1000)
+        StartMission()
+        return
+    end
+    
+    -- Clean up old mission state but keep the vehicle
+    MISSION_ACTIVATED = false
+    LocalPlayer.state.MissionCompleted = false
+    
+    -- Clean up blips
+    if MISSION_BLIP and DoesBlipExist(MISSION_BLIP) then
+        RemoveBlip(MISSION_BLIP)
+        MISSION_BLIP = nil
+    end
+    
+    if MISSION_AREA and DoesBlipExist(MISSION_AREA) then
+        RemoveBlip(MISSION_AREA)
+        MISSION_AREA = nil
+    end
+    
+    -- Remove the return to mission giver blip
+    if LocalPlayer.state.ReturnBlip and DoesBlipExist(LocalPlayer.state.ReturnBlip) then
+        RemoveBlip(LocalPlayer.state.ReturnBlip)
+        LocalPlayer.state.ReturnBlip = nil
+    end
+    
+    -- Reset mission-related states
+    LocalPlayer.state.AlreadyPaid = false
+    
+    QBCore.Functions.Notify('Starting new mission using the existing vehicle...', 'primary', 5000)
+    
+    -- Short delay before starting new mission
+    Wait(1000)
+    
+    -- Start a modified mission that uses the existing vehicle
+    StartMissionWithExistingVehicle(currentVehicle)
+end
+
+-- Function to start a mission with a pre-existing vehicle
+function StartMissionWithExistingVehicle(vehicle)
+    MISSION_ACTIVATED = true
+    
+    -- Select a random vehicle model from config for mission data
+    local vehicleModel = Config.missionVehicles[math.random(1, #Config.missionVehicles)]
+    
+    if not vehicleModel then
+        QBCore.Functions.Notify('ERROR: No mission vehicle models found in config', 'error', 5000)
+        return
+    end
+    
+    -- Restore wheels to the vehicle if any were removed
+    RestoreWheelsForNewMission(vehicle)
+    
+    -- Fix and clean the vehicle
+    SetVehicleFixed(vehicle)
+    SetVehicleDirtLevel(vehicle, 0.0)
+    
+    -- Get vehicle position for mission area
+    local vehicleCoords = GetEntityCoords(vehicle)
+    
+    -- Create mission area and blip
+    local radius = Config.missionArea.radius
+    MISSION_AREA = AddBlipForRadius(vehicleCoords.x, vehicleCoords.y, vehicleCoords.z, radius)
+    
+    SetBlipColour(MISSION_AREA, Config.missionArea.color)
+    SetBlipAlpha(MISSION_AREA, 80)
+    
+    -- Create mission vehicle blip
+    MISSION_BLIP = AddBlipForEntity(vehicle)
+    SetBlipSprite(MISSION_BLIP, Config.missionBlip.sprite)
+    SetBlipColour(MISSION_BLIP, Config.missionBlip.color)
+    SetBlipScale(MISSION_BLIP, 1.0)
+    SetBlipDisplay(MISSION_BLIP, 2)
+    BeginTextCommandSetBlipName("STRING")
+    AddTextComponentString('Target Vehicle')
+    EndTextCommandSetBlipName(MISSION_BLIP)
+    
+    -- Set as mission entity to prevent automatic cleanup
+    SetEntityAsMissionEntity(vehicle, true, true)
+    
+    -- Set global vehicle reference for this mission
+    TARGET_VEHICLE = vehicle
+    
+    QBCore.Functions.Notify('New mission started with the same vehicle! Steal its wheels again.', 'success', 8000)
+    
+    -- Alert police after a delay
+    Citizen.CreateThread(function()
+        Citizen.Wait(Config.policeCallTime)
+        
+        if MISSION_ACTIVATED then
+            TriggerDispatch(vehicleCoords)
+        end
+    end)
+end
 
 CreateMissionPed()

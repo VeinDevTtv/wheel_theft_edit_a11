@@ -102,36 +102,61 @@ function RaiseCar()
             Entity(vehicle).state.IsMissionTarget = true
         end
         
-        -- Properly play animation with TaskPlayAnim and freeze player
-        local animDict = "mini@repair"
-        local animName = "fixing_a_ped"
+        -- Use mechanic animation where player lies down to check under the car
+        local dict = "anim@amb@clubhouse@tutorial@bkr_tut_ig3@"
+        local anim = "machinic_loop_mechandplayer"
         
-        -- Request the animation dictionary
-        RequestAnimDict(animDict)
-        local animLoaded = false
+        RequestAnimDict(dict)
         local animTimeout = 5000 -- 5 seconds timeout
         
-        -- Wait for animation to load
-        while not HasAnimDictLoaded(animDict) and animTimeout > 0 do
+        -- Wait for animation dict to load
+        while not HasAnimDictLoaded(dict) and animTimeout > 0 do
             Citizen.Wait(100)
             animTimeout = animTimeout - 100
         end
         
-        if not HasAnimDictLoaded(animDict) then
-            -- Fallback to a different animation if the first one fails
-            animDict = "amb@world_human_vehicle_mechanic@male@base"
-            animName = "base"
-            RequestAnimDict(animDict)
+        -- Try alternatives if first animation fails to load
+        if not HasAnimDictLoaded(dict) then
+            dict = "amb@world_human_vehicle_mechanic@male@base"
+            anim = "base"
+            RequestAnimDict(dict)
             
             animTimeout = 5000
-            while not HasAnimDictLoaded(animDict) and animTimeout > 0 do
+            while not HasAnimDictLoaded(dict) and animTimeout > 0 do
                 Citizen.Wait(100)
                 animTimeout = animTimeout - 100
             end
+            
+            -- If that also fails, try one more alternative
+            if not HasAnimDictLoaded(dict) then
+                dict = "amb@prop_human_parking_meter@male@base"
+                anim = "base"
+                RequestAnimDict(dict)
+                
+                animTimeout = 5000
+                while not HasAnimDictLoaded(dict) and animTimeout > 0 do
+                    Citizen.Wait(100)
+                    animTimeout = animTimeout - 100
+                end
+            end
         end
         
-        if HasAnimDictLoaded(animDict) then
-            TaskPlayAnim(playerPed, animDict, animName, 8.0, -8.0, -1, 1, 0, false, false, false)
+        -- Position player near the vehicle
+        local vehpos = GetEntityCoords(vehicle)
+        local min, max = GetModelDimensions(GetEntityModel(vehicle))
+        local width = ((max.x - min.x) / 2) - ((max.x - min.x) / 4)
+        local length = ((max.y - min.y) / 2) - ((max.y - min.y) / 4)
+        
+        -- Position player at the driver side of the vehicle
+        local playerPos = vector3(vehpos.x - width - 0.5, vehpos.y, vehpos.z)
+        local heading = GetHeadingFromVector_2d(vehpos.x - playerPos.x, vehpos.y - playerPos.y)
+        
+        -- Make player face the vehicle
+        SetEntityHeading(playerPed, heading)
+        
+        -- Start the animation
+        if HasAnimDictLoaded(dict) then
+            TaskPlayAnim(playerPed, dict, anim, 8.0, -8.0, -1, 1, 0, false, false, false)
             FreezeEntityPosition(playerPed, true)
         else
             QBCore.Functions.Notify('Error loading animation, but continuing with lift...', 'error', 3000)
@@ -157,9 +182,6 @@ function RaiseCar()
             end
 
             local vehpos = GetEntityCoords(veh)
-            local playerCoords = GetEntityCoords(playerPed)
-            local heading = GetHeadingFromVector_2d(playerCoords.x - vehpos.x, playerCoords.y - vehpos.y)
-            SetEntityHeading(playerPed, heading)
             
             -- Request jackstand model
             local model = 'imp_prop_axel_stand_01a'
@@ -192,16 +214,35 @@ function RaiseCar()
             -- Freeze vehicle to prevent movement during lifting
             FreezeEntityPosition(veh, true)
 
+            -- Calculate positions for jackstands using vehicle dimensions
             local min, max = GetModelDimensions(GetEntityModel(veh))
             local width = ((max.x - min.x) / 2) - ((max.x - min.x) / 3.3)
             local length = ((max.y - min.y) / 2) - ((max.y - min.y) / 3.3)
             local zOffset = 0.5
-
+            
+            -- Create a scene where the player appears to be working under the vehicle
+            -- Create a realistic delay between placing each jackstand
+            
+            -- First jackstand (front left)
             local flWheelStand = CreateObject(GetHashKey(model), vehpos.x - width, vehpos.y + length, vehpos.z - zOffset, true, true, true)
+            PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+            Citizen.Wait(800)
+            
+            -- Second jackstand (front right)
             local frWheelStand = CreateObject(GetHashKey(model), vehpos.x + width, vehpos.y + length, vehpos.z - zOffset, true, true, true)
+            PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+            Citizen.Wait(800)
+            
+            -- Third jackstand (rear left)
             local rlWheelStand = CreateObject(GetHashKey(model), vehpos.x - width, vehpos.y - length, vehpos.z - zOffset, true, true, true)
+            PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+            Citizen.Wait(800)
+            
+            -- Fourth jackstand (rear right)
             local rrWheelStand = CreateObject(GetHashKey(model), vehpos.x + width, vehpos.y - length, vehpos.z - zOffset, true, true, true)
-
+            PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+            
+            -- Set up animations for the jackstands to look proper under the car
             AttachEntityToEntity(flWheelStand, veh, 0, -width, length, -zOffset, 0.0, 0.0, -90.0, false, false, false, false, 0, true)
             FinishJackstand(flWheelStand)
 
@@ -219,7 +260,12 @@ function RaiseCar()
             -- Save jacks to state
             TriggerServerEvent('ls_wheel_theft:server:saveJacks', netId, NetworkGetNetworkIdFromEntity(flWheelStand), NetworkGetNetworkIdFromEntity(frWheelStand), NetworkGetNetworkIdFromEntity(rlWheelStand), NetworkGetNetworkIdFromEntity(rrWheelStand), true)
 
-            -- Lift the vehicle gradually
+            -- Lift the vehicle gradually with sound effects
+            QBCore.Functions.Notify('Lifting vehicle...', 'primary', 3000)
+            
+            -- Play hydraulic jack sound
+            PlaySoundFrontend(-1, "VEHICLES_TRANSIT_HYDRAULIC_UP", "VEHICLES_TRANSIT_SOUND", 0)
+            
             local addZ = 0
             while addZ < height do
                 addZ = addZ + 0.001
@@ -235,6 +281,12 @@ function RaiseCar()
 
             -- Complete the process
             Citizen.Wait(1500)
+            
+            -- Play sound when jackstand placement is finished
+            PlaySoundFrontend(-1, "Place_Prop_Success", "DLC_Dmod_Prop_Editor_Sounds", 0)
+            
+            -- Let the player finish the animation before standing up
+            Citizen.Wait(1000)
             ClearPedTasks(playerPed)
             FreezeEntityPosition(playerPed, false)
 
@@ -295,7 +347,6 @@ function RegisterTargetVehicleWithOxTarget(vehicle)
     if not vehicle or not DoesEntityExist(vehicle) then return end
     
     local netId = NetworkGetNetworkIdFromEntity(vehicle)
-    QBCore.Functions.Notify('Registering vehicle wheels for targeting...', 'primary', 2000)
     
     -- Only register if vehicle is raised
     if not Entity(vehicle).state.IsVehicleRaised then
@@ -306,9 +357,16 @@ function RegisterTargetVehicleWithOxTarget(vehicle)
     -- Clear any existing target options for this vehicle to prevent duplicates
     exports.ox_target:removeEntity(netId)
     
+    -- Remove any existing target vehicle from the tracking array if it's the same vehicle
+    for i, v in ipairs(targetVehicleNetIds) do
+        if v == netId then
+            table.remove(targetVehicleNetIds, i)
+            break
+        end
+    end
+    
     -- Check if this is the mission target vehicle
     local isTargetVehicle = (vehicle == TARGET_VEHICLE) or Entity(vehicle).state.IsMissionTarget
-    QBCore.Functions.Notify('Debug: Is mission target? ' .. tostring(isTargetVehicle), 'primary', 3000)
     
     -- Define wheel bone names and indices
     local wheels = {
@@ -328,12 +386,9 @@ function RegisterTargetVehicleWithOxTarget(vehicle)
             bones = { wheel.bone },
             distance = 1.5,
             canInteract = function()
-                -- Make sure vehicle is still raised and player has permission
                 return Entity(vehicle).state.IsVehicleRaised
             end,
             onSelect = function()
-                -- Start wheel dismount process
-                QBCore.Functions.Notify('Starting wheel removal...', 'primary', 3000)
                 local coordsTable = nil -- Not needed for this call
                 StartWheelDismount(vehicle, wheel.index, false, true, coordsTable, false)
             end
@@ -359,19 +414,7 @@ function RegisterTargetVehicleWithOxTarget(vehicle)
                         break
                     end
                 end
-                
-                -- Debug notifications to check conditions
-                local isVehicleRaised = Entity(vehicle).state.IsVehicleRaised
-                QBCore.Functions.Notify('Debug: All wheels removed: ' .. tostring(allWheelsRemoved) .. ' | Vehicle raised: ' .. tostring(isVehicleRaised), 'primary', 3000)
-                
-                -- Extra debug to confirm this is the target vehicle
-                if vehicle == TARGET_VEHICLE then
-                    QBCore.Functions.Notify('Debug: This is the target vehicle!', 'success', 3000)
-                else
-                    QBCore.Functions.Notify('Debug: This is NOT the target vehicle!', 'error', 3000)
-                end
-                
-                return allWheelsRemoved and isVehicleRaised
+                return allWheelsRemoved and Entity(vehicle).state.IsVehicleRaised
             end,
             onSelect = function()
                 local lowered = LowerVehicle()
@@ -404,7 +447,6 @@ function RegisterTargetVehicleWithOxTarget(vehicle)
                 end
                 
                 -- Start wheel theft now
-                QBCore.Functions.Notify('Starting wheel theft sale process...', 'success', 5000)
                 EnableSale()
                 
                 -- Schedule vehicle cleanup
@@ -432,12 +474,10 @@ function RegisterTargetVehicleWithOxTarget(vehicle)
             end,
             onSelect = function()
                 -- Lower the vehicle and retrieve jackstand
-                QBCore.Functions.Notify('Finishing wheel theft...', 'primary', 3000)
                 local lowered = LowerVehicle(false, true)
                 Citizen.Wait(1000)
                 SpawnBricksUnderVehicle(vehicle)
                 TriggerServerEvent('ls_wheel_theft:RetrieveItem', Config.jackStandName)
-                QBCore.Functions.Notify('Jack stand retrieved!', 'success', 5000)
                 
                 -- Remove the vehicle from targeting
                 if netId then
@@ -456,21 +496,17 @@ function RegisterTargetVehicleWithOxTarget(vehicle)
     -- Add the options to the vehicle
     exports.ox_target:addEntity(netId, options)
     
-    -- Add to tracking table if not nil
-    if targetVehicleNetIds ~= nil then
-        table.insert(targetVehicleNetIds, netId)
-    else
-        -- Create the table if it doesn't exist
-        targetVehicleNetIds = {netId}
-    end
+    -- Add to tracking table
+    table.insert(targetVehicleNetIds, netId)
     
-    QBCore.Functions.Notify('Wheels are now ready for theft. Get closer to interact.', 'success', 5000)
+    QBCore.Functions.Notify('Wheels are now ready for theft', 'success', 3000)
 end
 
 function LowerVehicle(errorCoords, bypass)
     working = false
 
-    local playerCoords = GetEntityCoords(PlayerPedId(-1))
+    local playerPed = PlayerPedId()
+    local playerCoords = GetEntityCoords(playerPed)
     local veh, netId = GetNearestVehicle(playerCoords.x, playerCoords.y, playerCoords.z, 5.0)
 
     if veh and (Entity(veh).state.IsVehicleRaised or Entity(veh).state.spacerOnKqCarLift) then
@@ -481,6 +517,50 @@ function LowerVehicle(errorCoords, bypass)
         end
 
         if Entity(veh).state.IsVehicleRaised then
+            -- Play the same "lying down" animation as when raising the car
+            local dict = "anim@amb@clubhouse@tutorial@bkr_tut_ig3@"
+            local anim = "machinic_loop_mechandplayer"
+            
+            RequestAnimDict(dict)
+            local animTimeout = 5000
+            
+            while not HasAnimDictLoaded(dict) and animTimeout > 0 do
+                Citizen.Wait(100)
+                animTimeout = animTimeout - 100
+            end
+            
+            -- Try alternatives if first animation fails to load
+            if not HasAnimDictLoaded(dict) then
+                dict = "amb@world_human_vehicle_mechanic@male@base"
+                anim = "base"
+                RequestAnimDict(dict)
+                
+                animTimeout = 5000
+                while not HasAnimDictLoaded(dict) and animTimeout > 0 do
+                    Citizen.Wait(100)
+                    animTimeout = animTimeout - 100
+                end
+            end
+            
+            -- Position player for the animation
+            local vehpos = GetEntityCoords(veh)
+            local min, max = GetModelDimensions(GetEntityModel(veh))
+            local width = ((max.x - min.x) / 2) - ((max.x - min.x) / 4)
+            
+            -- Position player at driver side
+            local heading = GetHeadingFromVector_2d(vehpos.x - playerCoords.x, vehpos.y - playerCoords.y)
+            SetEntityHeading(playerPed, heading)
+            
+            -- Play animation if loaded
+            if HasAnimDictLoaded(dict) then
+                TaskPlayAnim(playerPed, dict, anim, 8.0, -8.0, -1, 1, 0, false, false, false)
+                FreezeEntityPosition(playerPed, true)
+            end
+            
+            -- Play sounds for removing jackstands
+            PlaySoundFrontend(-1, "TOOL_BOX_ACTION_GENERIC", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+            Citizen.Wait(1000)
+
             NetworkRequestControlOfEntity(veh)
 
             local timeout = 2000
@@ -491,8 +571,10 @@ function LowerVehicle(errorCoords, bypass)
 
             local vehpos = GetEntityCoords(veh)
 
+            -- Play hydraulic lowering sound
+            PlaySoundFrontend(-1, "VEHICLES_TRANSIT_HYDRAULIC_DOWN", "VEHICLES_TRANSIT_SOUND", 0)
+            
             local removeZ = 0
-
             while removeZ < 0.18 do
                 removeZ = removeZ + 0.001
                 SetEntityCoordsNoOffset(veh, vehpos.x, vehpos.y, vehpos.z - removeZ, true, true, true)
@@ -501,13 +583,21 @@ function LowerVehicle(errorCoords, bypass)
 
             FreezeEntityPosition(veh, true)
 
+            -- Remove jackstands with sound effects
             for i = 4, 1, -1 do
                 if Entity(veh).state['jackStand' .. i] then
+                    PlaySoundFrontend(-1, "REMOVE_TOOL", "GTAO_FM_VEHICLE_ARMORY_RADIO_SOUNDS", 0)
+                    Citizen.Wait(300)
                     TriggerServerEvent('ls_wheel_theft:server:forceDeleteJackStand', (Entity(veh).state['jackStand' .. i]))
                 end
             end
 
-            Citizen.Wait(100)
+            Citizen.Wait(500)
+            
+            -- Clear animation
+            ClearPedTasks(playerPed)
+            FreezeEntityPosition(playerPed, false)
+            
             FreezeEntityPosition(veh, false)
 
             TriggerServerEvent('ls_wheel_theft:server:setIsRaised', netId, false)

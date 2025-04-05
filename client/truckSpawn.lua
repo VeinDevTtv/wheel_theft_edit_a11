@@ -67,6 +67,19 @@ function DespawnWorkVehicle()
     if TARGET_VEHICLE and DoesEntityExist(TARGET_VEHICLE) then
         QBCore.Functions.Notify('Removing target vehicle...', 'primary', 3000)
         
+        -- Delete any brick props
+        if MISSION_BRICKS and #MISSION_BRICKS > 0 then
+            local brickCount = 0
+            for k, brick in pairs(MISSION_BRICKS) do
+                if DoesEntityExist(brick) then
+                    DeleteEntity(brick)
+                    brickCount = brickCount + 1
+                end
+            end
+            QBCore.Functions.Notify('Removed ' .. brickCount .. ' brick props', 'success', 3000)
+            MISSION_BRICKS = {}
+        end
+        
         -- Mark as mission entity so it can be deleted
         SetEntityAsMissionEntity(TARGET_VEHICLE, true, true)
         

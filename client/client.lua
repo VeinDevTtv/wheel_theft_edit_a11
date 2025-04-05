@@ -17,6 +17,7 @@ PLAYER_JOB = nil
 STORED_WHEELS = {}
 WHEEL_PROP = nil
 TARGET_VEHICLE = nil
+MISSION_BRICKS = {}
 
 -- Variables for ox_target integration
 local targetVehicleNetIds = {}
@@ -714,6 +715,17 @@ function CleanupMissionVehicle()
             
             -- Delete the vehicle if it still exists
             if TARGET_VEHICLE and DoesEntityExist(TARGET_VEHICLE) then
+                -- Delete all brick props
+                if #MISSION_BRICKS > 0 then
+                    for k, brick in pairs(MISSION_BRICKS) do
+                        if DoesEntityExist(brick) then
+                            DeleteEntity(brick)
+                        end
+                    end
+                    QBCore.Functions.Notify('Removed all bricks', 'success', 3000)
+                    MISSION_BRICKS = {}
+                end
+                
                 SetEntityAsMissionEntity(TARGET_VEHICLE, true, true)
                 DeleteVehicle(TARGET_VEHICLE)
                 QBCore.Functions.Notify('Target vehicle has been cleaned up', 'success', 3000)
@@ -721,4 +733,41 @@ function CleanupMissionVehicle()
             end
         end)
     end
+end
+
+-- Function to restore wheels on a vehicle for a new mission
+function RestoreWheelsForNewMission(vehicle)
+    if not vehicle or not DoesEntityExist(vehicle) then
+        return false
+    end
+    
+    -- Check if any wheels are missing
+    local wheelsNeedRestoring = false
+    for i=0, 3 do
+        local wheelOffset = GetVehicleWheelXOffset(vehicle, i)
+        if wheelOffset == 9999999.0 then
+            wheelsNeedRestoring = true
+            break
+        end
+    end
+    
+    if wheelsNeedRestoring then
+        -- Restore all wheels to the vehicle
+        SetVehicleWheelXOffset(vehicle, 0, -0.88)  -- front left
+        SetVehicleWheelXOffset(vehicle, 1, 0.88)   -- front right
+        SetVehicleWheelXOffset(vehicle, 2, -0.88)  -- rear left
+        SetVehicleWheelXOffset(vehicle, 3, 0.88)   -- rear right
+        
+        -- Force wheel update
+        SetVehicleOnGroundProperly(vehicle)
+        SetVehicleTyreFixed(vehicle, 0)
+        SetVehicleTyreFixed(vehicle, 1)
+        SetVehicleTyreFixed(vehicle, 2)
+        SetVehicleTyreFixed(vehicle, 3)
+        
+        QBCore.Functions.Notify('Vehicle wheels have been restored for the new mission!', 'success', 5000)
+        return true
+    end
+    
+    return false
 end
