@@ -98,3 +98,17 @@ exports('ls_jackstand', function(event, item, inventory, slot, data)
         end
     end
 end)
+
+-- Event handler for completion bonus when player returns to mission giver
+RegisterServerEvent('ls_wheel_theft:server:GiveJobBonus')
+AddEventHandler('ls_wheel_theft:server:GiveJobBonus', function()
+    local _source = source
+    -- Define the bonus reward amount 
+    local bonusAmount = math.random(300, 500) -- Adjust the bonus range as needed
+    
+    -- Add the bonus reward
+    AddMoney(_source, bonusAmount)
+    
+    -- Notify the player
+    TriggerClientEvent('QBCore:Notify', _source, 'You received a bonus of $'..bonusAmount..' for completing the job!', 'success', 5000)
+end)

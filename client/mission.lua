@@ -1,8 +1,11 @@
 local cooldown = false
 local missionPedNetId = nil
+local missionPedObject = nil
 
 function CreateMissionPed()
     local missionTable = Config.missionPeds['mission_ped']
+    QBCore.Functions.Notify('Creating mission ped at: ' .. missionTable.location.x .. ', ' .. missionTable.location.y .. ', ' .. missionTable.location.z, 'primary', 5000)
+    
     local ped = SpawnPed(missionTable)
     local blip = missionTable.blip
     local blipCoords = missionTable.location
@@ -12,14 +15,35 @@ function CreateMissionPed()
     end
     
     -- Store the ped netId for use with ox_target
-    missionPedNetId = NetworkGetNetworkIdFromEntity(ped)
+    if DoesEntityExist(ped) then
+        QBCore.Functions.Notify('Mission ped created successfully', 'success', 5000)
+        missionPedNetId = NetworkGetNetworkIdFromEntity(ped)
+        
+        if missionPedNetId == 0 then
+            QBCore.Functions.Notify('ERROR: Failed to get network ID for mission ped', 'error', 5000)
+        else
+            QBCore.Functions.Notify('Mission ped network ID: ' .. missionPedNetId, 'primary', 5000)
+        end
+    else
+        QBCore.Functions.Notify('ERROR: Failed to create mission ped', 'error', 5000)
+        return
+    end
     
     -- Register the ped with ox_target
-    RegisterPedWithOxTarget(ped)
+    if Config.target.enabled then
+        Wait(500) -- Small delay to ensure networking is established
+        RegisterPedWithOxTarget(ped)
+    else
+        -- Legacy system
+        EnableMission(ped)
+    end
 end
 
 -- Function bach n'registeri ped f ox_target
 function RegisterPedWithOxTarget(ped)
+    -- Debug notification
+    QBCore.Functions.Notify('Attempting to register NPC with ox_target', 'primary', 5000)
+    
     -- Hna ghadi n'defini options dial ox_target
     local options = {
         {
@@ -27,8 +51,8 @@ function RegisterPedWithOxTarget(ped)
             icon = 'fas fa-car-burst',
             label = 'Start Wheel Theft Mission',
             canInteract = function()
-                -- Only show this option if not in a mission
-                return not MISSION_ACTIVATED
+                -- Only show this option if not in a mission and not completed mission
+                return not MISSION_ACTIVATED and not LocalPlayer.state.MissionCompleted
             end,
             onSelect = function()
                 if not cooldown then
@@ -42,8 +66,8 @@ function RegisterPedWithOxTarget(ped)
             icon = 'fas fa-ban',
             label = 'Cancel Mission',
             canInteract = function()
-                -- Only show this option if already in a mission
-                return MISSION_ACTIVATED
+                -- Only show this option if already in a mission and not completed
+                return MISSION_ACTIVATED and not LocalPlayer.state.MissionCompleted
             end,
             onSelect = function()
                 if not cooldown then
@@ -51,12 +75,62 @@ function RegisterPedWithOxTarget(ped)
                     CancelMission()
                 end
             end
+        },
+        {
+            name = 'ls_wheel_theft:finish_job',
+            icon = 'fas fa-check-circle',
+            label = 'Finish Wheel Theft Job',
+            canInteract = function()
+                -- Only show this option if the mission is completed (wheels sold)
+                return LocalPlayer.state.MissionCompleted
+            end,
+            onSelect = function()
+                if not cooldown then
+                    SetCooldown(3000)
+                    -- Complete the job by cancelling the mission and cleaning up
+                    MISSION_ACTIVATED = false
+                    LocalPlayer.state.MissionCompleted = false
+                    QBCore.Functions.Notify('Job completed successfully! The car has been disposed of.', 'success', 5000)
+                    
+                    -- Now it's safe to clean up everything
+                    if MISSION_BLIP and MISSION_AREA then
+                        RemoveBlip(MISSION_BLIP)
+                        RemoveBlip(MISSION_AREA)
+                    end
+                    
+                    -- Remove any remaining blips
+                    local blips = GetActiveBlips()
+                    for _, blip in ipairs(blips) do
+                        RemoveBlip(blip)
+                    end
+                    
+                    -- Finally remove the target vehicle
+                    DespawnWorkVehicle()
+                    
+                    -- Add a bonus reward for completing the full mission
+                    TriggerServerEvent('ls_wheel_theft:server:GiveJobBonus')
+                end
+            end
         }
     }
     
-    -- Add the options to the entity using ox_target
-    -- We use the netId for consistency across the network
-    exports.ox_target:addEntity(missionPedNetId, options)
+    -- Store the actual ped instead of just the netId for removal later
+    missionPedObject = ped
+    
+    -- Try using addLocalEntity instead of addEntity
+    exports.ox_target:addLocalEntity(ped, options)
+    QBCore.Functions.Notify('NPC registered with ox_target using local entity', 'success', 5000)
+end
+
+-- Helper function to get all active blips
+function GetActiveBlips()
+    local blips = {}
+    for i = 1, 500 do -- Check a reasonable number of blip IDs
+        if DoesBlipExist(i) then
+            table.insert(blips, i)
+        end
+    end
+    return blips
 end
 
 -- This function is no longer needed with ox_target, but we'll keep it as a legacy option
@@ -122,11 +196,83 @@ end
 AddEventHandler('onResourceStop', function(resourceName)
     if GetCurrentResourceName() == resourceName then
         -- Clean up the ped from ox_target when resource stops
-        if missionPedNetId then
-            -- Remove the entity from ox_target
-            exports.ox_target:removeEntity(missionPedNetId)
+        if missionPedObject and DoesEntityExist(missionPedObject) then
+            -- Remove the entity from ox_target using the object reference
+            exports.ox_target:removeLocalEntity(missionPedObject)
+            QBCore.Functions.Notify('Cleaned up mission ped from ox_target', 'primary', 5000)
         end
     end
 end)
+
+-- Debug command to directly start a mission
+RegisterCommand('startWheelTheft', function()
+    QBCore.Functions.Notify('Starting wheel theft mission via debug command', 'primary', 5000)
+    StartMission()
+end, false)
+
+-- Debug command to test jackstand functionality directly
+RegisterCommand('testJackstand', function()
+    -- Spawn a vehicle nearby if none exists
+    local playerPed = PlayerPedId()
+    local playerCoords = GetEntityCoords(playerPed)
+    
+    local vehicle = GetClosestVehicle(playerCoords.x, playerCoords.y, playerCoords.z, 10.0, 0, 71)
+    
+    if not vehicle or not DoesEntityExist(vehicle) then
+        -- No vehicle nearby, spawn one
+        QBCore.Functions.Notify('No vehicle found nearby, spawning test vehicle', 'primary', 3000)
+        
+        local modelHash = GetHashKey('sultanrs') -- Use a car from your config
+        
+        RequestModel(modelHash)
+        local modelTimeout = 10000
+        while not HasModelLoaded(modelHash) and modelTimeout > 0 do
+            Citizen.Wait(100)
+            modelTimeout = modelTimeout - 100
+        end
+        
+        if HasModelLoaded(modelHash) then
+            -- Spawn vehicle 5 meters in front of player
+            local heading = GetEntityHeading(playerPed)
+            local forwardX = math.sin(math.rad(-heading)) * 5.0
+            local forwardY = math.cos(math.rad(-heading)) * 5.0
+            
+            vehicle = CreateVehicle(modelHash, playerCoords.x + forwardX, playerCoords.y + forwardY, playerCoords.z, heading, true, false)
+            
+            -- Set as mission entity so it can be deleted
+            SetEntityAsMissionEntity(vehicle, true, true)
+            
+            -- Set as target vehicle
+            TARGET_VEHICLE = vehicle
+            QBCore.Functions.Notify('Test vehicle spawned and set as TARGET_VEHICLE', 'success', 5000)
+        else
+            QBCore.Functions.Notify('Failed to load vehicle model', 'error', 5000)
+            return
+        end
+    else
+        -- Use existing vehicle as target
+        TARGET_VEHICLE = vehicle
+        QBCore.Functions.Notify('Using nearby vehicle as TARGET_VEHICLE', 'success', 3000)
+    end
+    
+    -- Give player a jackstand
+    TriggerServerEvent('QBCore:Server:AddItem', Config.jackStandName, 1)
+    QBCore.Functions.Notify('Added a jackstand to your inventory', 'success', 3000)
+    
+    -- Show instructions
+    QBCore.Functions.Notify('Use the jackstand from your inventory near the target vehicle', 'primary', 10000)
+end, false)
+
+-- Debug command to show target vehicle location
+RegisterCommand('targetVehicleInfo', function()
+    if TARGET_VEHICLE then
+        local coords = GetEntityCoords(TARGET_VEHICLE)
+        QBCore.Functions.Notify('Target vehicle coords: ' .. coords.x .. ', ' .. coords.y .. ', ' .. coords.z, 'primary', 10000)
+        -- Set a waypoint to the target vehicle
+        SetNewWaypoint(coords.x, coords.y)
+    else
+        QBCore.Functions.Notify('No target vehicle exists. Start a mission first!', 'error', 5000)
+    end
+end, false)
 
 CreateMissionPed()

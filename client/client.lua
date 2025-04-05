@@ -202,7 +202,7 @@ Citizen.CreateThread(function()
 
         Citizen.Wait(sleep)
     end
-end
+end)
 
 function NearestVehicleCached(coords, radius)
     return UseCache('nearestCacheVehicle', function()
@@ -213,7 +213,6 @@ function NearestVehicleCached(coords, radius)
         else
             return vehicle
         end
-
     end, 500)
 end
 
@@ -532,6 +531,12 @@ function EnableWheelTakeOut()
 
                 Citizen.Wait(sleep)
             end
+            
+            -- Clean up when no more wheels are stored
+            if truckNetId then
+                exports.ox_target:removeEntity(truckNetId)
+                truckNetId = nil
+            end
         end)
     else
         -- Register trucks that have stored wheels with ox_target
@@ -633,10 +638,13 @@ function IsVehicleATruck(vehicle)
     end, 500)
 end
 
+-- Event to lift vehicle using jackstand from inventory
 RegisterNetEvent('ls_wheel_theft:LiftVehicle')
 AddEventHandler('ls_wheel_theft:LiftVehicle', function()
+    -- Debug output to check if the event is triggered
+    QBCore.Functions.Notify('Attempting to use jackstand...', 'primary', 2000)
+    -- Call the RaiseCar function from jackstand.lua
     RaiseCar()
-    TriggerServerEvent('ls_wheel_theft:ResetPlayerState', NetworkGetNetworkIdFromEntity(PlayerPedId()))
 end)
 
 RegisterNetEvent('ls_wheel_theft:LowerVehicle')

@@ -32,7 +32,7 @@ Config.printLicensePlateToConsole = false
 -- Players can only raise/lower TARGET VEHICLES by default
 Config.jackSystem = {
    ['raise'] = {
-       everyone = false, --everyone can raise any car
+       everyone = true, --everyone can raise any car
 
        -- Only these jobs can raise any car
        jobs = {
@@ -42,7 +42,7 @@ Config.jackSystem = {
        }
    },
    ['lower'] = {
-       everyone = false, --everyone can lower any car
+       everyone = true, --everyone can lower any car
 
        -- Only these jobs can lower any car
        jobs = {
