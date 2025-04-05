@@ -39,10 +39,43 @@ end
 -- Function katdepawni mission fach t'cancella
 function DespawnWorkVehicle()
     if WORK_VEHICLE and DoesEntityExist(WORK_VEHICLE) then
-        -- Set as mission entity to ensure proper cleanup
+        QBCore.Functions.Notify('Removing work vehicle...', 'primary', 3000)
+        
+        -- Delete any wheels in the vehicle
+        if STORED_WHEELS and #STORED_WHEELS > 0 then
+            for i=1, #STORED_WHEELS do
+                if DoesEntityExist(STORED_WHEELS[i]) then
+                    DeleteEntity(STORED_WHEELS[i])
+                end
+            end
+            STORED_WHEELS = {}
+        end
+        
+        -- Mark as mission entity so it can be deleted
         SetEntityAsMissionEntity(WORK_VEHICLE, true, true)
+        
+        -- Delete the vehicle
         DeleteVehicle(WORK_VEHICLE)
+        
+        -- Reset the global variable
         WORK_VEHICLE = nil
-        QBCore.Functions.Notify('Work vehicle has been returned', 'inform', 5000)
+        
+        QBCore.Functions.Notify('Work vehicle removed!', 'success', 3000)
+    end
+    
+    -- Ensure target vehicle is also cleaned up
+    if TARGET_VEHICLE and DoesEntityExist(TARGET_VEHICLE) then
+        QBCore.Functions.Notify('Removing target vehicle...', 'primary', 3000)
+        
+        -- Mark as mission entity so it can be deleted
+        SetEntityAsMissionEntity(TARGET_VEHICLE, true, true)
+        
+        -- Delete the vehicle
+        DeleteVehicle(TARGET_VEHICLE)
+        
+        -- Reset the global variable
+        TARGET_VEHICLE = nil
+        
+        QBCore.Functions.Notify('Target vehicle removed!', 'success', 3000)
     end
 end

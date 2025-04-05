@@ -44,6 +44,28 @@ function RegisterPedWithOxTarget(ped)
     -- Debug notification
     QBCore.Functions.Notify('Attempting to register NPC with ox_target', 'primary', 5000)
     
+    -- Ensure LocalPlayer.state is initialized
+    if not LocalPlayer.state then
+        LocalPlayer.state = {}
+    end
+    
+    -- Initialize the mission completion state if needed
+    if LocalPlayer.state.MissionCompleted == nil then
+        LocalPlayer.state.MissionCompleted = false
+        QBCore.Functions.Notify('Initializing mission state to false', 'primary', 2000)
+    end
+    
+    -- Store the actual ped for removal later
+    missionPedObject = ped
+    
+    -- Clear any existing targets for this ped to prevent duplicates
+    local pedModel = GetEntityModel(ped)
+    exports.ox_target:removeModel(pedModel)
+    
+    if missionPedNetId and missionPedNetId ~= 0 then
+        exports.ox_target:removeEntity(missionPedNetId)
+    end
+    
     -- Hna ghadi n'defini options dial ox_target
     local options = {
         {
@@ -82,7 +104,7 @@ function RegisterPedWithOxTarget(ped)
             label = 'Finish Wheel Theft Job',
             canInteract = function()
                 -- Only show this option if the mission is completed (wheels sold)
-                return LocalPlayer.state.MissionCompleted
+                return LocalPlayer.state.MissionCompleted == true
             end,
             onSelect = function()
                 if not cooldown then
@@ -93,33 +115,51 @@ function RegisterPedWithOxTarget(ped)
                     QBCore.Functions.Notify('Job completed successfully! The car has been disposed of.', 'success', 5000)
                     
                     -- Now it's safe to clean up everything
-                    if MISSION_BLIP and MISSION_AREA then
+                    if MISSION_BLIP and DoesBlipExist(MISSION_BLIP) then
                         RemoveBlip(MISSION_BLIP)
-                        RemoveBlip(MISSION_AREA)
+                        MISSION_BLIP = nil
                     end
                     
-                    -- Remove any remaining blips
+                    if MISSION_AREA and DoesBlipExist(MISSION_AREA) then
+                        RemoveBlip(MISSION_AREA)
+                        MISSION_AREA = nil
+                    end
+                    
+                    -- Remove the return to mission giver blip
+                    if LocalPlayer.state.ReturnBlip and DoesBlipExist(LocalPlayer.state.ReturnBlip) then
+                        RemoveBlip(LocalPlayer.state.ReturnBlip)
+                        LocalPlayer.state.ReturnBlip = nil
+                    end
+                    
+                    -- Remove any other remaining blips
                     local blips = GetActiveBlips()
                     for _, blip in ipairs(blips) do
-                        RemoveBlip(blip)
+                        if DoesBlipExist(blip) then
+                            RemoveBlip(blip)
+                        end
                     end
                     
                     -- Finally remove the target vehicle
                     DespawnWorkVehicle()
                     
-                    -- Add a bonus reward for completing the full mission
-                    TriggerServerEvent('ls_wheel_theft:server:GiveJobBonus')
+                    -- No need to give additional bonus as they've already been paid at the seller
+                    -- The state AlreadyPaid is set in selling.lua when the player completes the sale
+                    if not LocalPlayer.state.AlreadyPaid then
+                        -- Add a bonus reward only if they haven't been paid yet
+                        TriggerServerEvent('ls_wheel_theft:server:GiveJobBonus')
+                        LocalPlayer.state.AlreadyPaid = true
+                    else
+                        QBCore.Functions.Notify('Mission completed! You already received payment earlier.', 'primary', 5000)
+                    end
                 end
             end
         }
     }
     
-    -- Store the actual ped instead of just the netId for removal later
-    missionPedObject = ped
+    -- Choose only ONE registration method - model is more reliable
+    exports.ox_target:addModel(pedModel, options)
     
-    -- Try using addLocalEntity instead of addEntity
-    exports.ox_target:addLocalEntity(ped, options)
-    QBCore.Functions.Notify('NPC registered with ox_target using local entity', 'success', 5000)
+    QBCore.Functions.Notify('NPC registered with ox_target using model only', 'success', 5000)
 end
 
 -- Helper function to get all active blips

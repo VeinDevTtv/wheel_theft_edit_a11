@@ -371,6 +371,65 @@ function RegisterTargetVehicleWithOxTarget(vehicle, isTargetVehicle)
         end
     })
     
+    -- Add finish stealing option if this is a target vehicle
+    if isTargetVehicle then
+        table.insert(options, {
+            name = 'ls_wheel_theft:finish_stealing',
+            icon = 'fas fa-check',
+            label = 'Finish Stealing',
+            distance = 3.0,
+            canInteract = function()
+                -- Only show if all wheels are removed
+                local allWheelsRemoved = true
+                for i=0, 3 do
+                    local wheelOffset = GetVehicleWheelXOffset(vehicle, i)
+                    if wheelOffset ~= 9999999.0 then
+                        allWheelsRemoved = false
+                        break
+                    end
+                end
+                return allWheelsRemoved and Entity(vehicle).state.IsVehicleRaised
+            end,
+            onSelect = function()
+                local lowered = LowerVehicle()
+                while not lowered do
+                    Citizen.Wait(100)
+                end
+                SpawnBricksUnderVehicle(vehicle)
+                TriggerServerEvent('ls_wheel_theft:RetrieveItem', Config.jackStandName)
+                
+                -- Remove mission blip and area blip
+                if MISSION_BLIP and DoesBlipExist(MISSION_BLIP) then
+                    RemoveBlip(MISSION_BLIP)
+                    MISSION_BLIP = nil
+                end
+                
+                if MISSION_AREA and DoesBlipExist(MISSION_AREA) then
+                    RemoveBlip(MISSION_AREA)
+                    MISSION_AREA = nil
+                end
+                
+                -- Remove the vehicle from targeting
+                if netId and Contains(targetVehicleNetIds, netId) then
+                    exports.ox_target:removeEntity(netId)
+                    for i, v in ipairs(targetVehicleNetIds) do
+                        if v == netId then
+                            table.remove(targetVehicleNetIds, i)
+                            break
+                        end
+                    end
+                end
+                
+                -- Start wheel theft now
+                QBCore.Functions.Notify('Starting wheel theft sale process...', 'success', 5000)
+                EnableSale()
+                
+                -- Schedule vehicle cleanup
+                CleanupMissionVehicle()
+            end
+        })
+    end
+    
     -- Add the options to the vehicle
     exports.ox_target:addEntity(netId, options)
     

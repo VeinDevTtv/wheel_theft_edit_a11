@@ -7,12 +7,10 @@ local sellerPedNetId = nil
 local cratePropNetId = nil
 
 function ContinueSale(sellerPed, crateProp)
-    -- Store network IDs for ox_target
-    sellerPedNetId = NetworkGetNetworkIdFromEntity(sellerPed)
-    cratePropNetId = NetworkGetNetworkIdFromEntity(crateProp)
-    
     -- Register the seller ped and crate with ox_target if enabled
     if Config.target.enabled then
+        -- Wait a bit to ensure everything is properly loaded
+        Citizen.Wait(2000)
         RegisterSellerWithOxTarget(sellerPed)
         RegisterCrateWithOxTarget(crateProp)
     end
@@ -133,176 +131,6 @@ RegisterCommand('debugSeller', function()
     end
 end, false)
 
--- Function to register the seller ped with ox_target using a model target as fallback
-function RegisterSellerWithOxTarget(sellerPed)
-    if not sellerPed or not DoesEntityExist(sellerPed) then
-        QBCore.Functions.Notify('ERROR: Seller ped does not exist', 'error', 5000)
-        return
-    end
-    
-    local pedModel = GetEntityModel(sellerPed)
-    local pedCoords = GetEntityCoords(sellerPed)
-    
-    QBCore.Functions.Notify('Registering seller model for targeting...', 'primary', 2000)
-    
-    -- Define options for the seller model
-    local options = {
-        {
-            name = 'ls_wheel_theft:complete_sale_model',
-            icon = 'fas fa-dollar-sign',
-            label = 'Complete Sale',
-            distance = 3.0,
-            canInteract = function(entity)
-                -- Only show if all 4 wheels are stored and this is the right ped
-                local entityCoords = GetEntityCoords(entity)
-                local distance = #(entityCoords - pedCoords)
-                return distance < 0.5 and #storedWheels == 4
-            end,
-            onSelect = function()
-                QBCore.Functions.Notify('Completing sale...', 'primary', 2000)
-                CompleteSale(sellerPed)
-            end
-        }
-    }
-    
-    -- Register with model targeting as primary method
-    exports.ox_target:addModel(pedModel, options)
-    QBCore.Functions.Notify('Seller model registered for targeting!', 'success', 5000)
-    
-    -- Also try entity-based targeting as backup
-    NetworkRegisterEntityAsNetworked(sellerPed)
-    local netId = NetworkGetNetworkIdFromEntity(sellerPed)
-    
-    if netId ~= 0 then
-        -- Also add entity-based option as backup
-        options = {
-            {
-                name = 'ls_wheel_theft:complete_sale',
-                icon = 'fas fa-dollar-sign',
-                label = 'Complete Sale',
-                distance = 3.0,
-                canInteract = function()
-                    return #storedWheels == 4
-                end,
-                onSelect = function()
-                    QBCore.Functions.Notify('Completing sale...', 'primary', 2000)
-                    CompleteSale(sellerPed)
-                end
-            }
-        }
-        
-        exports.ox_target:addEntity(netId, options)
-    end
-end
-
--- Function to register the crate with ox_target
-function RegisterCrateWithOxTarget(crateProp)
-    if not crateProp or not DoesEntityExist(crateProp) then
-        QBCore.Functions.Notify('ERROR: Crate prop does not exist', 'error', 5000)
-        return
-    end
-    
-    local propModel = GetEntityModel(crateProp)
-    local propCoords = GetEntityCoords(crateProp)
-    
-    QBCore.Functions.Notify('Registering crate for targeting...', 'primary', 2000)
-    
-    -- Define options for the crate model
-    local options = {
-        {
-            name = 'ls_wheel_theft:drop_wheel_model',
-            icon = 'fas fa-car',
-            label = 'Drop Off Wheel',
-            distance = 3.0,
-            canInteract = function(entity)
-                -- Only show if player is holding a wheel and not all wheels are stored
-                -- And this is the right prop
-                local entityCoords = GetEntityCoords(entity)
-                local distance = #(entityCoords - propCoords)
-                return distance < 0.5 and HOLDING_WHEEL ~= nil and #storedWheels < 4
-            end,
-            onSelect = function()
-                QBCore.Functions.Notify('Dropping off wheel...', 'primary', 2000)
-                table.insert(storedWheels, HOLDING_WHEEL)
-                DropOffWheel(crateProp, #storedWheels)
-            end
-        }
-    }
-    
-    -- Register with model targeting as primary method
-    exports.ox_target:addModel(propModel, options)
-    QBCore.Functions.Notify('Crate model registered for targeting!', 'success', 5000)
-    
-    -- Also try entity-based targeting as backup
-    NetworkRegisterEntityAsNetworked(crateProp)
-    local netId = NetworkGetNetworkIdFromEntity(crateProp)
-    
-    if netId ~= 0 then
-        -- Also add entity-based option as backup
-        options = {
-            {
-                name = 'ls_wheel_theft:drop_wheel',
-                icon = 'fas fa-car',
-                label = 'Drop Off Wheel',
-                distance = 3.0,
-                canInteract = function()
-                    return HOLDING_WHEEL ~= nil and #storedWheels < 4
-                end,
-                onSelect = function()
-                    QBCore.Functions.Notify('Dropping off wheel...', 'primary', 2000)
-                    table.insert(storedWheels, HOLDING_WHEEL)
-                    DropOffWheel(crateProp, #storedWheels)
-                end
-            }
-        }
-        
-        exports.ox_target:addEntity(netId, options)
-    end
-end
-
-function CompleteSale(sellerPed)
-    saleActive = false
-    RetrieveMoney('sale_ped', sellerPed)
-
-    SetEntityAsNoLongerNeeded(sellerPed)
-
-    for k=1, #storedWheels, 1 do
-        SetEntityAsNoLongerNeeded(storedWheels[k])
-    end
-
-    -- Clean up ox_target if it's enabled
-    if Config.target.enabled then
-        if sellerPedNetId then
-            exports.ox_target:removeEntity(sellerPedNetId)
-        end
-        
-        if cratePropNetId then
-            exports.ox_target:removeEntity(cratePropNetId)
-        end
-    end
-
-    RemoveBlip(sellerBlip)
-    sellerPedNetId = nil
-    cratePropNetId = nil
-    storedWheels = {}
-    
-    -- Mark mission as completed but pending final turn-in
-    Player(PlayerId()).state.MissionCompleted = true
-    QBCore.Functions.Notify('Sale completed! Return to the mission giver to finish the job.', 'success', 8000)
-    
-    -- Create a blip to guide the player back to the mission giver
-    local missionTable = Config.missionPeds['mission_ped']
-    local missionBlip = CreateSellerBlip(vector3(missionTable.location.x, missionTable.location.y, missionTable.location.z), 
-        500, 2, 1.0, 1.0, "Return to Mission Giver")
-    
-    if Config.enableBlipRoute then
-        SetBlipRoute(missionBlip, true)
-    end
-    
-    -- Keep the target vehicle - don't cancel the mission yet
-    -- CancelMission() will be called when the player returns to the mission giver
-end
-
 function EnableSale()
     local sellerTable = Config.missionPeds['sale_ped']
     if not sellerTable then
@@ -328,7 +156,7 @@ function EnableSale()
         return
     end
 
-    -- Store references
+    -- Store references to clean up later
     sellerPedNetId = NetworkGetNetworkIdFromEntity(ped)
     cratePropNetId = NetworkGetNetworkIdFromEntity(crateProp)
     
@@ -344,20 +172,165 @@ function EnableSale()
     end
 
     saleActive = true
-    
-    -- Register with ox_target
-    if Config.target and Config.target.enabled then
-        -- Wait a bit to ensure everything is properly loaded
-        Citizen.Wait(2000)
-        
-        -- Primary: Register model-based targeting first
-        RegisterSellerWithOxTarget(ped)
-        RegisterCrateWithOxTarget(crateProp)
-    end
-    
     ContinueSale(ped, crateProp)
     
     QBCore.Functions.Notify('Take your wheels to the crate and then complete the sale with the dealer', 'success', 8000)
+end
+
+-- Function to register the seller ped with ox_target
+function RegisterSellerWithOxTarget(sellerPed)
+    if not sellerPed or not DoesEntityExist(sellerPed) then
+        QBCore.Functions.Notify('ERROR: Seller ped does not exist', 'error', 5000)
+        return
+    end
+    
+    local pedModel = GetEntityModel(sellerPed)
+    local pedCoords = GetEntityCoords(sellerPed)
+    
+    QBCore.Functions.Notify('Registering seller for targeting...', 'primary', 2000)
+    
+    -- Clear any existing targets for this model to prevent duplicates
+    exports.ox_target:removeModel(pedModel)
+    
+    -- Define options for the seller model
+    local options = {
+        {
+            name = 'ls_wheel_theft:complete_sale',
+            icon = 'fas fa-dollar-sign',
+            label = 'Complete Sale',
+            distance = 3.0,
+            canInteract = function(entity)
+                -- Only show if all 4 wheels are stored and this is the right ped
+                -- Check position to ensure it's the right instance of this model
+                local entityCoords = GetEntityCoords(entity)
+                local distance = #(entityCoords - pedCoords)
+                return distance < 1.0 and #storedWheels == 4
+            end,
+            onSelect = function()
+                QBCore.Functions.Notify('Completing sale...', 'primary', 2000)
+                CompleteSale(sellerPed)
+            end
+        }
+    }
+    
+    -- Register with model targeting
+    exports.ox_target:addModel(pedModel, options)
+    QBCore.Functions.Notify('Seller registered for targeting! Speak to them when all wheels are dropped off.', 'success', 5000)
+end
+
+-- Function to register the crate with ox_target
+function RegisterCrateWithOxTarget(crateProp)
+    if not crateProp or not DoesEntityExist(crateProp) then
+        QBCore.Functions.Notify('ERROR: Crate prop does not exist', 'error', 5000)
+        return
+    end
+    
+    local propModel = GetEntityModel(crateProp)
+    local propCoords = GetEntityCoords(crateProp)
+    
+    QBCore.Functions.Notify('Registering crate for targeting...', 'primary', 2000)
+    
+    -- Clear any existing targets for this model to prevent duplicates
+    exports.ox_target:removeModel(propModel)
+    
+    -- Define options for the crate
+    local options = {
+        {
+            name = 'ls_wheel_theft:drop_wheel',
+            icon = 'fas fa-car',
+            label = 'Drop Off Wheel',
+            distance = 3.0,
+            canInteract = function(entity)
+                -- Only show if player is holding a wheel and not all wheels are stored
+                -- Check position to ensure it's the right instance of this model
+                local entityCoords = GetEntityCoords(entity)
+                local distance = #(entityCoords - propCoords)
+                return distance < 1.0 and HOLDING_WHEEL ~= nil and #storedWheels < 4
+            end,
+            onSelect = function()
+                QBCore.Functions.Notify('Dropping off wheel...', 'primary', 2000)
+                table.insert(storedWheels, HOLDING_WHEEL)
+                DropOffWheel(crateProp, #storedWheels)
+            end
+        }
+    }
+    
+    -- Register with model targeting
+    exports.ox_target:addModel(propModel, options)
+    QBCore.Functions.Notify('Crate registered for targeting! Use target to drop off wheels.', 'success', 5000)
+end
+
+function CompleteSale(sellerPed)
+    saleActive = false
+    RetrieveMoney('sale_ped', sellerPed)
+
+    -- Delete the seller ped
+    if DoesEntityExist(sellerPed) then
+        DeleteEntity(sellerPed)
+    end
+
+    -- Delete all stored wheels
+    for k, wheel in pairs(storedWheels) do
+        if wheel and DoesEntityExist(wheel) then
+            DeleteEntity(wheel)
+        end
+    end
+    storedWheels = {}
+    
+    -- Clean up ox_target if it's enabled
+    if Config.target.enabled then
+        -- Clean up model targeting
+        local sellerModel = GetEntityModel(sellerPed)
+        local crateModel = nil
+        
+        if Config.missionPeds and Config.missionPeds['sale_ped'] and Config.missionPeds['sale_ped'].wheelDropOff then
+            crateModel = GetHashKey(Config.missionPeds['sale_ped'].wheelDropOff.crateProp)
+            exports.ox_target:removeModel(crateModel)
+        end
+        
+        exports.ox_target:removeModel(sellerModel)
+        
+        -- Also try to clean up entity targets if they exist
+        if sellerPedNetId then
+            exports.ox_target:removeEntity(sellerPedNetId)
+        end
+        
+        if cratePropNetId then
+            exports.ox_target:removeEntity(cratePropNetId)
+        end
+    end
+
+    RemoveBlip(sellerBlip)
+    sellerPedNetId = nil
+    cratePropNetId = nil
+    
+    -- Set the paid state to prevent double payment
+    LocalPlayer.state.AlreadyPaid = true
+    
+    -- Make server-side payment
+    TriggerServerEvent('ls_wheel_theft:server:CompleteSale', #storedWheels)
+    
+    -- Mark mission as completed but pending final turn-in
+    -- This will trigger the "Finish Mission" option at the mission giver
+    Player(PlayerId()).state.MissionCompleted = true
+    LocalPlayer.state.MissionCompleted = true
+    QBCore.Functions.Notify('Sale completed! Return to the mission giver to finish the job.', 'success', 8000)
+    
+    -- Create a blip to guide the player back to the mission giver
+    local missionTable = Config.missionPeds['mission_ped']
+    local missionBlip = CreateSellerBlip(vector3(missionTable.location.x, missionTable.location.y, missionTable.location.z), 
+        500, 2, 1.0, 1.0, "Return to Mission Giver")
+    
+    if Config.enableBlipRoute then
+        SetBlipRoute(missionBlip, true)
+    end
+    
+    -- Store the blip ID in both states to ensure it's accessible
+    Player(PlayerId()).state.ReturnBlip = missionBlip
+    LocalPlayer.state.ReturnBlip = missionBlip
+    
+    -- Keep the target vehicle - don't cancel the mission yet
+    -- CancelMission() will be called when the player returns to the mission giver
 end
 
 function SetCooldown(time)
@@ -371,7 +344,15 @@ end
 -- Event to remove the entities from ox_target when the resource stops
 AddEventHandler('onResourceStop', function(resourceName)
     if GetCurrentResourceName() == resourceName and Config.target.enabled then
-        -- Clean up the entities from ox_target when resource stops
+        -- Clean up any model targets to prevent issues on resource restart
+        -- These should be the models used by the seller and crate
+        local sellerModel = GetHashKey(Config.missionPeds['sale_ped'].pedModel)
+        local crateModel = GetHashKey(Config.missionPeds['sale_ped'].wheelDropOff.crateProp)
+        
+        exports.ox_target:removeModel(sellerModel)
+        exports.ox_target:removeModel(crateModel)
+        
+        -- Also try to clean up entity-based targets if they exist
         if sellerPedNetId then
             exports.ox_target:removeEntity(sellerPedNetId)
         end
@@ -393,9 +374,12 @@ function DropOffWheel(crateProp, wheelCount)
     local player = PlayerPedId()
     local coords = GetEntityCoords(crateProp)
 
-    DeleteEntity(HOLDING_WHEEL)
-    ClearPedTasksImmediately(player)
-    HOLDING_WHEEL = nil
+    -- Delete the wheel in player's hands
+    if HOLDING_WHEEL and DoesEntityExist(HOLDING_WHEEL) then
+        DeleteEntity(HOLDING_WHEEL)
+        HOLDING_WHEEL = nil
+        ClearPedTasksImmediately(player)
+    end
     
     -- Create a new wheel in the crate (position depends on wheel count)
     local model = GetHashKey(Settings.wheelTakeOff.wheelModel)
@@ -435,6 +419,9 @@ function DropOffWheel(crateProp, wheelCount)
     SetEntityAsMissionEntity(wheelProp, true, true)
     
     FreezeEntityPosition(wheelProp, true)
+    
+    -- Store the wheel properly in the storedWheels array at the specific index
+    storedWheels[wheelCount] = wheelProp
     
     if wheelCount == 4 then
         QBCore.Functions.Notify('All wheels have been dropped off. Speak to the seller to complete the sale!', 'success', 5000)

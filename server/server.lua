@@ -112,3 +112,22 @@ AddEventHandler('ls_wheel_theft:server:GiveJobBonus', function()
     -- Notify the player
     TriggerClientEvent('QBCore:Notify', _source, 'You received a bonus of $'..bonusAmount..' for completing the job!', 'success', 5000)
 end)
+
+-- Event handler for completing the sale at the seller
+RegisterServerEvent('ls_wheel_theft:server:CompleteSale')
+AddEventHandler('ls_wheel_theft:server:CompleteSale', function(wheelCount)
+    local _source = source
+    -- Calculate payment based on number of wheels
+    local payPerWheel = 250 -- Base amount per wheel
+    local totalPay = wheelCount * payPerWheel
+    
+    -- Add a random bonus to make the payment more interesting
+    local randomBonus = math.random(100, 300)
+    totalPay = totalPay + randomBonus
+    
+    -- Add the money to the player
+    AddMoney(_source, totalPay)
+    
+    -- Notify the player
+    TriggerClientEvent('QBCore:Notify', _source, 'You received $'..totalPay..' for selling '..wheelCount..' wheels!', 'success', 5000)
+end)

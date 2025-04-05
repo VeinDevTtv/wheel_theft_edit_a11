@@ -132,15 +132,29 @@ function StartWheelTheft(vehicle)
                 -- Target implementation is handled by RegisterTargetVehicleWithOxTarget
             end
 
-            if #STORED_WHEELS == 4 then
-                QBCore.Functions.Notify('Head to Wheel Seller to complete mission', 'inform', 8000)
-                EnableSale()
-                StopWheelTheft(vehicle)
-
+            -- Check if all wheels are removed
+            local allWheelsRemoved = true
+            for i=0, 3 do
+                local wheelOffset = GetVehicleWheelXOffset(vehicle, i)
+                if wheelOffset ~= 9999999.0 then
+                    allWheelsRemoved = false
+                    break
+                end
+            end
+            
+            -- If all wheels are removed and the player is not currently holding a wheel,
+            -- we stop the wheel theft loop - the rest will be handled by the finish option in RegisterTargetVehicleWithOxTarget
+            if allWheelsRemoved and not WHEEL_PROP then
+                QBCore.Functions.Notify('All wheels have been removed. Lower the vehicle to finish.', 'inform', 8000)
                 return
             end
         else
-            --stop wheel theft and cancel mission
+            -- Stop wheel theft and cancel mission if player is too far away
+            if distance > 300 then
+                QBCore.Functions.Notify('You have moved too far from the target vehicle.', 'error', 5000)
+                CancelMission()
+                return
+            end
         end
 
         Citizen.Wait(sleep)
@@ -687,3 +701,24 @@ AddEventHandler('onResourceStop', function(resourceName)
         end
     end
 end)
+
+-- Add this function to clean up the target vehicle after all wheels are removed
+function CleanupMissionVehicle()
+    if TARGET_VEHICLE and DoesEntityExist(TARGET_VEHICLE) then
+        -- Start a timer to delete the vehicle after 10 seconds
+        Citizen.CreateThread(function()
+            QBCore.Functions.Notify('Target vehicle will be removed in 10 seconds...', 'primary', 5000)
+            
+            -- Wait 10 seconds
+            Citizen.Wait(10000)
+            
+            -- Delete the vehicle if it still exists
+            if TARGET_VEHICLE and DoesEntityExist(TARGET_VEHICLE) then
+                SetEntityAsMissionEntity(TARGET_VEHICLE, true, true)
+                DeleteVehicle(TARGET_VEHICLE)
+                QBCore.Functions.Notify('Target vehicle has been cleaned up', 'success', 3000)
+                TARGET_VEHICLE = nil
+            end
+        end)
+    end
+end
