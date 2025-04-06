@@ -690,9 +690,80 @@ function AttachJackStandsToVehicle(vehicle)
         true
     )
     
-    -- Create thread for lifting the vehicle with jackstands and modifying suspension
+    -- Create thread for lifting the vehicle with simple approach
     Citizen.CreateThread(function()
-        -- Request jackstand extension model
+        -- Get initial vehicle position
+        local initialPos = GetEntityCoords(vehicle)
+        if Config.debug then
+            QBCore.Functions.Notify('Initial pos: ' .. vec2str(initialPos), 'primary', 3000)
+        end
+        
+        -- Target lift height
+        local liftHeight = 0.35 -- Increased for more visibility
+        
+        -- Request network control of vehicle
+        NetworkRequestControlOfEntity(vehicle)
+        local timeout = 2000
+        while not NetworkHasControlOfEntity(vehicle) and timeout > 0 do
+            Citizen.Wait(100)
+            timeout = timeout - 100
+        end
+        
+        -- Play hydraulic lift sound
+        PlaySoundFrontend(-1, "VEHICLES_TRANSIT_HYDRAULIC_UP", "VEHICLES_TRANSIT_SOUND", 0)
+        
+        -- Unfreeze vehicle temporarily to allow lifting
+        FreezeEntityPosition(vehicle, false)
+        Citizen.Wait(100)
+        
+        -- Basic lift using coordinates (simplest and most reliable method)
+        local newPos = vector3(initialPos.x, initialPos.y, initialPos.z + liftHeight)
+        SetEntityCoords(vehicle, newPos.x, newPos.y, newPos.z, false, false, false, false)
+        Citizen.Wait(100)
+        
+        -- Freeze vehicle in raised position
+        FreezeEntityPosition(vehicle, true)
+        
+        -- Check if vehicle was actually raised
+        local finalPos = GetEntityCoords(vehicle)
+        local actualLift = finalPos.z - initialPos.z
+        
+        if Config.debug then
+            QBCore.Functions.Notify('Final pos: ' .. vec2str(finalPos), 'primary', 3000)
+            QBCore.Functions.Notify('Lift amount: ' .. tostring(actualLift), 'primary', 3000)
+        end
+        
+        -- If lift was unsuccessful, try one more time with a different approach
+        if actualLift < (liftHeight * 0.5) then
+            if Config.debug then
+                QBCore.Functions.Notify('First lift failed, trying backup method', 'error', 3000)
+            end
+            
+            -- Alternative method with offset coordinates
+            FreezeEntityPosition(vehicle, false)
+            Citizen.Wait(100)
+            SetEntityCoordsNoOffset(vehicle, initialPos.x, initialPos.y, initialPos.z + liftHeight, true, true, true)
+            Citizen.Wait(100)
+            FreezeEntityPosition(vehicle, true)
+            
+            -- Check again
+            finalPos = GetEntityCoords(vehicle)
+            actualLift = finalPos.z - initialPos.z
+            
+            if Config.debug then
+                QBCore.Functions.Notify('Second attempt lift: ' .. tostring(actualLift), 'primary', 3000)
+            end
+        end
+        
+        -- Set decor to mark vehicle as raised
+        DecorSetBool(vehicle, "WHEEL_THEFT_LIFTED", true)
+        
+        -- Play jackstand placement sound
+        PlaySoundFrontend(-1, "JACK_VEHICLE", "HUD_MINI_GAME_SOUNDSET", 0)
+        Citizen.Wait(200)
+        PlaySoundFrontend(-1, "CONFIRM_BEEP", "HUD_MINI_GAME_SOUNDSET", 0)
+        
+        -- Create extension objects for each jackstand (visual only)
         local extensionModel = 'prop_tool_jack'
         RequestModel(extensionModel)
         
@@ -702,133 +773,28 @@ function AttachJackStandsToVehicle(vehicle)
             modelTimeout = modelTimeout - 100
         end
         
-        if not HasModelLoaded(extensionModel) then
-            QBCore.Functions.Notify('Failed to load jackstand extension model', 'error', 3000)
-            return
-        end
-        
-        -- Create extension objects for each jackstand
-        local flExtension = CreateObject(GetHashKey(extensionModel), flStandPos.x, flStandPos.y, flStandPos.z, true, true, true)
-        local frExtension = CreateObject(GetHashKey(extensionModel), frStandPos.x, frStandPos.y, frStandPos.z, true, true, true)
-        local rlExtension = CreateObject(GetHashKey(extensionModel), rlStandPos.x, rlStandPos.y, rlStandPos.z, true, true, true)
-        local rrExtension = CreateObject(GetHashKey(extensionModel), rrStandPos.x, rrStandPos.y, rrStandPos.z, true, true, true)
-        
-        -- Hide extensions initially
-        SetEntityVisible(flExtension, false, false)
-        SetEntityVisible(frExtension, false, false)
-        SetEntityVisible(rlExtension, false, false)
-        SetEntityVisible(rrExtension, false, false)
-        
-        -- Save extensions to entity state
-        TriggerServerEvent('ls_wheel_theft:server:saveExtensionJacks', netId, 
-            NetworkGetNetworkIdFromEntity(flExtension), 
-            NetworkGetNetworkIdFromEntity(frExtension), 
-            NetworkGetNetworkIdFromEntity(rlExtension), 
-            NetworkGetNetworkIdFromEntity(rrExtension)
-        )
-        
-        -- Store initial position for reference
-        local initialPos = GetEntityCoords(vehicle)
-        
-        -- Target height for the lift
-        local targetHeight = 0.3  -- Increased from 0.18 for more visible lift
-        
-        -- Play hydraulic sound
-        PlaySoundFrontend(-1, "VEHICLES_TRANSIT_HYDRAULIC_UP", "VEHICLES_TRANSIT_SOUND", 0)
-        
-        -- Request network control of vehicle
-        NetworkRequestControlOfEntity(vehicle)
-        
-        local timeout = 2000
-        while not NetworkHasControlOfEntity(vehicle) and timeout > 0 do
-            Citizen.Wait(100)
-            timeout = timeout - 100
-        end
-        
-        -- Debug initial position
-        if Config.debug then
-            QBCore.Functions.Notify('Initial pos: ' .. vec2str(initialPos), 'primary', 3000)
-        end
-        
-        -- Make sure vehicle is in good condition first
-        SetVehicleFixed(vehicle)
-        
-        -- DIRECT APPROACH: Lift the vehicle immediately using several methods
-        
-        -- METHOD 1: Set entity coordinates (most reliable)
-        -- First unfreeze the vehicle to allow movement
-        FreezeEntityPosition(vehicle, false)
-        Citizen.Wait(50)
-        
-        -- Set the vehicle to a higher position
-        SetEntityCoordsNoOffset(vehicle, 
-            initialPos.x, 
-            initialPos.y, 
-            initialPos.z + targetHeight, 
-            true, true, true)
-        
-        -- METHOD 2: Modify vehicle suspension
-        -- This helps visually with wheel positions
-        SetVehicleSuspensionHeight(vehicle, -0.1)  -- Negative values raise the vehicle
-        
-        -- METHOD 3: Apply upward force to help with physics
-        ApplyForceToEntity(vehicle, 0, 0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0, true, true, true, false, true)
-        
-        -- Short wait for physics to settle
-        Citizen.Wait(300)
-        
-        -- METHOD 4: Try adjusting each wheel's offset
-        for i = 0, 7 do -- Up to 8 wheels for trucks
-            if not IsVehicleTyreBurst(vehicle, i, true) then
-                -- Adjust wheel positions
-                local currentOffset = GetVehicleWheelYOffset(vehicle, i)
-                SetVehicleWheelYOffset(vehicle, i, currentOffset - 0.05)
-            end
-        end
-        
-        -- Freeze the vehicle in place
-        Citizen.Wait(200)
-        FreezeEntityPosition(vehicle, true)
-        
-        -- Check final position
-        local finalPos = GetEntityCoords(vehicle)
-        local actualLift = finalPos.z - initialPos.z
-        
-        -- Debug final position
-        if Config.debug then
-            QBCore.Functions.Notify('Final pos: ' .. vec2str(finalPos), 'primary', 3000)
-            QBCore.Functions.Notify('Actual lift: ' .. tostring(actualLift), 'primary', 3000)
-        end
-        
-        -- Failsafe if vehicle didn't raise enough
-        if actualLift < (targetHeight * 0.5) then
-            QBCore.Functions.Notify('Using backup lifting method...', 'primary', 2000)
+        if HasModelLoaded(extensionModel) then
+            local flExtension = CreateObject(GetHashKey(extensionModel), flStandPos.x, flStandPos.y, flStandPos.z, true, true, true)
+            local frExtension = CreateObject(GetHashKey(extensionModel), frStandPos.x, frStandPos.y, frStandPos.z, true, true, true)
+            local rlExtension = CreateObject(GetHashKey(extensionModel), rlStandPos.x, rlStandPos.y, rlStandPos.z, true, true, true)
+            local rrExtension = CreateObject(GetHashKey(extensionModel), rrStandPos.x, rrStandPos.y, rrStandPos.z, true, true, true)
             
-            -- Try again with higher force
-            FreezeEntityPosition(vehicle, false)
-            SetEntityCoordsNoOffset(vehicle, initialPos.x, initialPos.y, initialPos.z + targetHeight, true, true, true)
-            ApplyForceToEntity(vehicle, 0, 0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0, true, true, true, false, true)
-            Citizen.Wait(300)
-            FreezeEntityPosition(vehicle, true)
+            -- Hide extensions (they're just for server tracking)
+            SetEntityVisible(flExtension, false, false)
+            SetEntityVisible(frExtension, false, false)
+            SetEntityVisible(rlExtension, false, false)
+            SetEntityVisible(rrExtension, false, false)
             
-            -- Check again
-            finalPos = GetEntityCoords(vehicle)
-            actualLift = finalPos.z - initialPos.z
-            
-            if Config.debug then
-                QBCore.Functions.Notify('Backup lift: ' .. tostring(actualLift), 'primary', 3000)
-            end
+            -- Save extensions to entity state
+            TriggerServerEvent('ls_wheel_theft:server:saveExtensionJacks', netId, 
+                NetworkGetNetworkIdFromEntity(flExtension), 
+                NetworkGetNetworkIdFromEntity(frExtension), 
+                NetworkGetNetworkIdFromEntity(rlExtension), 
+                NetworkGetNetworkIdFromEntity(rrExtension)
+            )
         end
         
-        -- Sound effects for completion
-        PlaySoundFrontend(-1, "JACK_VEHICLE", "HUD_MINI_GAME_SOUNDSET", 0)
-        Citizen.Wait(200)
-        PlaySoundFrontend(-1, "CONFIRM_BEEP", "HUD_MINI_GAME_SOUNDSET", 0)
-        
-        -- Set a global flag to help identify this vehicle
-        DecorSetBool(vehicle, "WHEEL_THEFT_LIFTED", true)
-        
-        -- Show final notification
+        -- Send success notification
         QBCore.Functions.Notify('Vehicle raised with jackstands', 'success', 3000)
     end)
     
