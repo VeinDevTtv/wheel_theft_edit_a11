@@ -716,10 +716,35 @@ function AttachJackStandsToVehicle(vehicle)
         FreezeEntityPosition(vehicle, false)
         Citizen.Wait(100)
         
-        -- Basic lift using coordinates (simplest and most reliable method)
-        local newPos = vector3(initialPos.x, initialPos.y, initialPos.z + liftHeight)
-        SetEntityCoords(vehicle, newPos.x, newPos.y, newPos.z, false, false, false, false)
-        Citizen.Wait(100)
+        -- Gradually raise the vehicle with animation
+        local currentHeight = 0
+        local increment = 0.005 -- Smaller increment for smoother animation
+        local waitTime = 10 -- Shorter wait time for more updates
+        
+        while currentHeight < liftHeight do
+            currentHeight = currentHeight + increment
+            if currentHeight > liftHeight then 
+                currentHeight = liftHeight -- Cap at target height
+            end
+            
+            -- Calculate new position
+            local newZ = initialPos.z + currentHeight
+            SetEntityCoords(vehicle, initialPos.x, initialPos.y, newZ, false, false, false, false)
+            
+            -- Add sound effects at certain height thresholds
+            if math.abs(currentHeight - 0.05) < 0.007 or 
+               math.abs(currentHeight - 0.15) < 0.007 or 
+               math.abs(currentHeight - 0.25) < 0.007 then
+                PlaySoundFrontend(-1, "JACK_VEHICLE", "HUD_MINI_GAME_SOUNDSET", 0)
+            end
+            
+            -- Wait between increments for smooth animation
+            Citizen.Wait(waitTime)
+        end
+        
+        -- Briefly apply an upward force to ensure vehicle is visibly raised
+        ApplyForceToEntity(vehicle, 0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0, true, true, true, false, true)
+        Citizen.Wait(50)
         
         -- Freeze vehicle in raised position
         FreezeEntityPosition(vehicle, true)
@@ -739,11 +764,22 @@ function AttachJackStandsToVehicle(vehicle)
                 QBCore.Functions.Notify('First lift failed, trying backup method', 'error', 3000)
             end
             
-            -- Alternative method with offset coordinates
+            -- Alternative method with gradual offset coordinates
             FreezeEntityPosition(vehicle, false)
             Citizen.Wait(100)
-            SetEntityCoordsNoOffset(vehicle, initialPos.x, initialPos.y, initialPos.z + liftHeight, true, true, true)
-            Citizen.Wait(100)
+            
+            -- Second attempt with gradual lifting
+            currentHeight = 0
+            while currentHeight < liftHeight do
+                currentHeight = currentHeight + increment * 2 -- Faster for backup method
+                if currentHeight > liftHeight then 
+                    currentHeight = liftHeight -- Cap at target height
+                end
+                
+                SetEntityCoordsNoOffset(vehicle, initialPos.x, initialPos.y, initialPos.z + currentHeight, true, true, true)
+                Citizen.Wait(waitTime)
+            end
+            
             FreezeEntityPosition(vehicle, true)
             
             -- Check again
